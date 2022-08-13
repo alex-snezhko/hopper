@@ -1,0 +1,311 @@
+import Option from "option"
+import Result from "result"
+import Number from "number"
+import Map from "map"
+import List from "list"
+import Array from "array"
+import String from "string"
+import Char from "char"
+import Regex from "regex"
+import Process from "sys/process"
+import File from "sys/file"
+
+enum RequestMethod {
+  Get,
+  Post,
+  Put,
+  Delete,
+  Head,
+  Patch,
+  Connect,
+  Options,
+  Trace
+}
+
+let toRequestMethod = str => {
+  match (str) {
+    "GET" => Some(Get),
+    "POST" => Some(Post),
+    "PUT" => Some(Put),
+    "DELETE" => Some(Delete),
+    "HEAD" => Some(Head),
+    "PATCH" => Some(Patch),
+    "CONNECT" => Some(Connect),
+    "OPTIONS" => Some(Options),
+    "TRACE" => Some(Trace),
+    _ => None
+  }
+}
+
+export record Request {
+  mut variables: Map.Map<String, String>,
+  _rawWagiEnv: Map.Map<String, String>,
+  method: RequestMethod,
+  headers: Map.Map<String, String>,
+  params: Map.Map<String, String>,
+  query: Map.Map<String, String>,
+  fullUrl: String,
+  body: String,
+}
+
+export enum Status {
+  HttpOk,
+  BadRequest,
+  Unauthorized,
+  NotFound,
+  MethodNotAllowed,
+  Conflict,
+}
+
+let statusNum = status => {
+  match (status) {
+    HttpOk => "200",
+    BadRequest => "400",
+    Unauthorized => "401",
+    NotFound => "404",
+    MethodNotAllowed => "405",
+    Conflict => "409",
+    _ => "500"
+  }
+}
+
+export record Response {
+  status: Status,
+  headers: Map.Map<String, String>,
+  body: String,
+}
+
+export type ReqHandler = Request -> Response
+
+export type Middleware = ReqHandler -> ReqHandler
+
+export record RouteHandler {
+  path: String,
+  route: Route,
+},
+export enum Route {
+  Endpoint(RequestMethod, ReqHandler),
+  Router(Option<Middleware>, List<RouteHandler>)
+}
+
+export let withMiddlewares = (middlewares: List<Middleware>, handler) => {
+  List.reduce((h, mw) => mw(h), handler, middlewares)
+}
+
+export let text = val => {
+  status: HttpOk,
+  headers: Map.fromList([("Content-Type", "text/plain")]),
+  body: toString(val)
+}
+
+export let get = (path, handler: ReqHandler) => {
+  { path, route: Endpoint(Get, handler) }
+}
+
+export let router = (path, routeHandlers: List<RouteHandler>) => {
+  { path, route: Router(None, routeHandlers) }
+}
+
+export let routerWithMiddleware = (path, middleware, routeHandlers: List<RouteHandler>) => {
+  { path, route: Router(Some(middleware), routeHandlers) }
+}
+
+export let log = val => {
+  ignore(File.fdWrite(File.stderr, toString(val) ++ "\n"))
+}
+
+let genericErrMsg = "make sure you are running in a properly configured WAGI environment"
+let failWithMsg = msg => fail "ERROR " ++ msg ++ "; " ++ genericErrMsg
+let failWithMsgWithErr = (msg, err) => fail "ERROR " ++ msg ++ "; " ++ genericErrMsg ++ "; err " ++ toString(err)
+
+let outputResponse = response => {
+  let { headers, body, status } = response
+  Map.forEach((key, val) => {
+    let line = key ++ "=" ++ val
+    let safeLine = Array.reduce(
+      (str, c) => str ++ (if (c == '\n') "\\n" else Char.toString(c)),
+      "",
+      String.explode(line)
+    )
+    print(safeLine)
+  }, headers)
+  print("Status: " ++ statusNum(status) ++ "\n")
+  print(body)
+}
+
+// TODO fix
+let failMethodNotAllowed = reqMethod => {
+  outputResponse({
+    status: MethodNotAllowed,
+    headers: Map.fromList([("Content-Type", "text/plain")]),
+    body: "405 Method Not Allowed"
+  })
+  Get
+}
+
+let readEnv = () => {
+  let vars = match (Process.env()) {
+    Ok(vars) => vars,
+    Err(err) => failWithMsgWithErr("Unable to read system environment variables", err)
+  }
+
+  Map.fromArray(Array.map(var => {
+    match (String.indexOf("=", var)) {
+      Some(i) => {
+        let varName = String.slice(0, i, var)
+        let varVal = String.slice(i + 1, String.length(var), var)
+        (varName, varVal)
+      },
+      None => failWithMsg("Error processing environment variable " ++ var)
+    }
+  }, vars))
+}
+
+let readBody = headers => {
+  let bodyLengthStr = match (Map.get("CONTENT_LENGTH", headers)) {
+    Some(val) => val,
+    None => failWithMsg("Did not find \"CONTENT_LENGTH\" header in request")
+  }
+
+  let bodyLength = match (Number.parseInt(bodyLengthStr, 10)) {
+    Ok(num) => num,
+    Err(err) => failWithMsgWithErr("Failed to parse \"CONTENT_LENGTH\" header from request to an integer", err)
+  }
+
+  match (File.fdRead(File.stdin, bodyLength)) {
+    Ok((body, _)) => body,
+    Err(err) => failWithMsgWithErr("Failed to read request body", err)
+  }
+}
+
+let getReqMethod = headers => {
+  match (Map.get("REQUEST_METHOD", headers)) {
+    Some(reqMethod) => {
+      match (toRequestMethod(reqMethod)) {
+        Some(reqMethod) => reqMethod,
+        None => failMethodNotAllowed(reqMethod)
+      }
+    },
+    _ => failWithMsg("Did not find \"REQUEST_METHOD\" header in request")
+  }
+}
+
+let readArgs = () => {
+  match (Process.argv()) {
+    Ok(args) => {
+      let [path, ...queryParamList] = Array.toList(args)
+      let queryParamMap = Map.fromList(List.map(
+        param => match (String.indexOf("=", param)) {
+          // some query params may only have a key, set value to empty string in this case
+          None => (param, ""),
+          Some(i) => {
+            let varName = String.slice(0, i, param)
+            let varVal = String.slice(i + 1, String.length(param), param)
+            (varName, varVal)
+          }
+        },
+        queryParamList
+      ))
+      (path, queryParamMap)
+    },
+    Err(err) => failWithMsgWithErr("Unable to read system arguments", err)
+  }
+}
+
+let findReqHandler = (reqMethod, path, routeHandler: RouteHandler) => {
+  let pathVars = Map.make()
+
+  let rec findReqHandlerHelper = (pathSegment, routeHandler) => {
+    log("pathSeg " ++ pathSegment)
+    let paramRegex = Result.unwrap(Regex.make(":\\w+"))
+    let paramNames = List.map(
+      (matchRes: Regex.MatchResult) => {
+        let str = Option.unwrap(matchRes.group(0))
+        // remove the colon at the beginning
+        String.slice(1, String.length(str), str)
+      },
+      Regex.findAll(paramRegex, routeHandler.path)
+    )
+    let routeWithVarCaptures = Regex.replaceAll(paramRegex, routeHandler.path, "(\\w+)")
+    log("withVarCaptures " ++ routeWithVarCaptures)
+    let pathMatch = match (Regex.make(routeWithVarCaptures)) {
+      Err(_) => failWithMsg("Invalid route path " ++ pathSegment),
+      Ok(re) => Regex.find(re, pathSegment)
+    }
+    log("pathMatch " ++ toString(pathMatch))
+    Option.flatMap((pathMatch: Regex.MatchResult) => {
+      let (thisPathStartI, thisPathEndI) = Option.unwrap(pathMatch.groupPosition(0))
+      if (thisPathStartI != 0) {
+        None
+      } else {
+        let matchedSegment = Option.unwrap(pathMatch.group(0))
+        if (pathMatch.numGroups > 1) {
+          let [_, ...paramVals] = Array.toList(Array.map(grp => Option.unwrap(grp), pathMatch.allGroups()))
+          List.forEach(((paramName, paramVal)) => {
+            log("param " ++ paramName ++ " " ++ paramVal)
+            Map.set(paramName, paramVal, pathVars)
+          }, List.zip(paramNames, paramVals))
+        }
+        log("nummatches " ++ toString(pathMatch.numGroups))
+        log("matched " ++ matchedSegment)
+        let reqHandler = match (routeHandler.route) {
+          Endpoint(handlerMethod, reqHandler) => if (handlerMethod == reqMethod) Some(reqHandler) else None,
+          Router(middleware, routeHandlers) => {
+            let nextPathSegment = String.slice(thisPathEndI, String.length(pathSegment), pathSegment)
+            log("nextseg " ++ nextPathSegment)
+            let reqHandler = List.reduce(
+              (found, routeHandler) => match (found) {
+                Some(_) => found,
+                None => findReqHandlerHelper(nextPathSegment, routeHandler)
+              },
+              None,
+              routeHandlers
+            )
+            let val = match ((middleware, reqHandler)) {
+              (Some(middleware), Some(reqHandler)) => Some(middleware(reqHandler)),
+              _ => reqHandler
+            }
+            val
+          }
+        }
+        reqHandler
+      }
+    }, pathMatch)
+  }
+
+  (findReqHandlerHelper(path, routeHandler), pathVars)
+}
+
+let notFoundResponse = {
+  status: NotFound,
+  headers: Map.fromList([("Content-Type", "text/plain")]),
+  body: "404 Not Found"
+}
+
+export let serve = (handler: RouteHandler) => {
+  let (path, query) = readArgs()
+  let headers = readEnv()
+  let reqMethod = getReqMethod(headers)
+  let body = readBody(headers)
+
+  let (handler, params) = findReqHandler(reqMethod, path, handler)
+  log("handler " ++ toString(handler))
+  let response = match (handler) {
+    None => notFoundResponse,
+    Some(handler) => {
+      let request = {
+        variables: Map.make(),
+        _rawWagiEnv: headers,
+        method: reqMethod,
+        headers,
+        params,
+        query,
+        fullUrl: "",
+        body
+      }
+      handler(request)
+    }
+  }
+  log("response " ++ toString(response))
+  outputResponse(response)
+}
