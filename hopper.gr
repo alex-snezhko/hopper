@@ -7,6 +7,7 @@ import Array from "array"
 import String from "string"
 import Char from "char"
 import Regex from "regex"
+import Int64 from "int64"
 import Process from "sys/process"
 import File from "sys/file"
 
@@ -39,9 +40,8 @@ let toRequestMethod = str => {
 
 export record Request {
   mut variables: Map.Map<String, String>,
-  _rawWagiEnv: Map.Map<String, String>,
+  wagiEnv: Map.Map<String, String>,
   method: RequestMethod,
-  headers: Map.Map<String, String>,
   params: Map.Map<String, String>,
   query: Map.Map<String, String>,
   fullUrl: String,
@@ -49,23 +49,124 @@ export record Request {
 }
 
 export enum Status {
+  Continue,
+  SwitchingProtocols,
+
   HttpOk,
+  Created,
+  Accepted,
+  NonAuthoritativeInformation,
+  NoContent,
+  ResetContent,
+  ParialContent,
+
+  MultipleChoices,
+  MovedPermanently,
+  Found,
+  SeeOther,
+  NotModified,
+  TemporaryRedirect,
+  PermanentRedirect,
+
   BadRequest,
   Unauthorized,
+  PaymentRequired,
+  Forbidden,
   NotFound,
   MethodNotAllowed,
+  NotAcceptable,
+  ProxyAuthenticationRequired,
+  RequestTimeout,
   Conflict,
+  Gone,
+  LengthRequired,
+  PreconditionFailed,
+  PayloadTooLarge,
+  UriTooLong,
+  UnsupportedMediaType,
+  RangeNotSatisfiable,
+  ExpectationFailed,
+  ImATeapot,
+  MisdirectedRequest,
+  TooEarly,
+  UpgradeRequired,
+  PrecoditionRequired,
+  TooManyRequests,
+  RequestHeaderFieldsTooLarge,
+  UnavailableForLegalReasons,
+
+  InternalServerError,
+  NotImplemented,
+  BadGateway,
+  ServiceUnavailable,
+  GatewayTimeout,
+  HttpVersionNotSupported,
+  VariantAlsoNegotiates,
+  NotExtended,
+  NetworkAuthenticationRequired,
+
+  HttpStatus(Number)
 }
 
 let statusNum = status => {
   match (status) {
+    Continue => "100",
+    SwitchingProtocols => "101",
+
     HttpOk => "200",
+    Created => "201",
+    Accepted => "202",
+    NonAuthoritativeInformation => "203",
+    NoContent => "204",
+    ResetContent => "205",
+    ParialContent => "206",
+
+    MultipleChoices => "300",
+    MovedPermanently => "301",
+    Found => "302",
+    SeeOther => "303",
+    NotModified => "304",
+    TemporaryRedirect => "307",
+    PermanentRedirect => "308",
+
     BadRequest => "400",
     Unauthorized => "401",
+    PaymentRequired => "402",
+    Forbidden => "403",
     NotFound => "404",
     MethodNotAllowed => "405",
+    NotAcceptable => "406",
+    ProxyAuthenticationRequired => "407",
+    RequestTimeout => "408",
     Conflict => "409",
-    _ => "500"
+    Gone => "410",
+    LengthRequired => "411",
+    PreconditionFailed => "412",
+    PayloadTooLarge => "413",
+    UriTooLong => "414",
+    UnsupportedMediaType => "415",
+    RangeNotSatisfiable => "416",
+    ExpectationFailed => "417",
+    ImATeapot => "418",
+    MisdirectedRequest => "421",
+    TooEarly => "425",
+    UpgradeRequired => "426",
+    PrecoditionRequired => "428",
+    TooManyRequests => "429",
+    RequestHeaderFieldsTooLarge => "431",
+    UnavailableForLegalReasons => "451",
+
+    InternalServerError => "500",
+    NotImplemented => "501",
+    BadGateway => "502",
+    ServiceUnavailable => "503",
+    GatewayTimeout => "504",
+    HttpVersionNotSupported => "505",
+    VariantAlsoNegotiates => "506",
+    NotExtended => "510",
+    NetworkAuthenticationRequired => "511",
+    
+    HttpStatus(status) => toString(status)
   }
 }
 
@@ -88,6 +189,127 @@ export enum Route {
   Router(Option<Middleware>, List<RouteHandler>)
 }
 
+// credit to https://github.com/deislabs/wagi-fileserver for the media types
+let mediaTypes = Map.fromList([
+  // Text formats
+  ("txt", "text/plain"),
+  ("md", "text/plain"),
+  ("mdown", "text/plain"),
+  ("htm", "text/html"),
+  ("html", "text/html"),
+  ("xhtml", "application/xhtml+xml"),
+  ("xml", "application/xml"),
+  ("css", "text/css"),
+  ("ics", "text/calendar"),
+
+  // Serialization formats
+  ("json", "application/json"),
+  ("jsonld", "application/ld+json"),
+  ("toml", "application/toml"),
+  ("yaml", "application/yaml"),
+
+  // Applications
+  // According to MSDN, prefered is text/javascript
+  ("js", "text/javascript"),
+  ("mjs", "text/javascript"),
+  ("wasm", "application/wasm"),
+  ("csv", "text/csv"),
+  ("sh", "application/x-sh"),
+
+  // Images
+  ("apng", "image/apng"),
+  ("avif", "image/avif"),
+  ("png", "image/png"),
+  ("png", "image/png"),
+  ("jpg", "image/jpeg"),
+  ("jpeg", "image/jpeg"),
+  ("pjpeg", "image/jpeg"),
+  ("pjp", "image/jpeg"),
+  ("jfif", "image/jpeg"),
+  ("gif", "image/gif"),
+  ("tif", "image/tiff"),
+  ("tiff", "image/tiff"),
+  ("webp", "image/webp"),
+  ("svg", "image/svg+xml"),
+  ("bmp", "image/bmp"),
+  ("ico", "image/vnd.microsoft.icon"),
+
+  // Audio/Video
+  ("aac", "audio/aac"),
+  ("avi", "video/x-msvideo"),
+  ("wav", "audio/wave"),
+  ("webm", "video/webm"),
+  ("mp3", "audio/mpeg"),
+  ("mp4", "video/mp4"),
+  ("mpeg", "video/mpeg"),
+  ("oga", "audio/ogg"),
+  ("ogv", "video/ogg"),
+  ("ogx", "application/ogg"),
+  ("ts", "video/mp2t"),
+
+  // Compressed
+  ("bz2", "application/x-bzip2"),
+  ("tbz", "application/x-bzip2"),
+  ("tbz2", "application/x-bzip2"),
+  ("gz", "application/gzip"),
+  ("rar", "application/vnd.rar"),
+  ("tar", "text/x-tar"),
+  ("tgz", "application/gzip"),
+  ("jar", "application/java-archive"),
+  ("mpkg", "application/vnd.apple.installer+xml"),
+  ("zip", "application/zip"),
+  ("7z", "application/x-7z-compressed"),
+
+  // Binary
+  ("azw", "application/vnd.amazon.ebook"),
+  ("bin", "application/octet-stream"),
+  ("doc", "application/msword"),
+  (
+    "docx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ),
+  ("epub", "application/epub+zip"),
+  ("odp", "application/vnd.oasis.opendocument.presentation"),
+  ("ods", "application/vnd.oasis.opendocument.spreadsheet"),
+  ("odt", "application/vnd.oasis.opendocument.text"),
+  ("pdf", "application/pdf"),
+  ("ppt", "application/vnd.ms-powerpoint"),
+  (
+    "pptx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ),
+  ("rtf", "application/rtf"),
+  ("vsd", "application/vnd.visio"),
+  ("xls", "application/vnd.ms-excel"),
+  (
+    "xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  ),
+
+  // Fonts
+  ("eot", "application/vnd.ms-fontobject"),
+  ("otf", "font/otf"),
+  ("ttf", "font/ttf"),
+  ("woff", "font/woff"),
+  ("woff2", "font/woff2"),
+])
+
+let getFileType = filename => {
+  match (String.lastIndexOf(".", filename)) {
+    Some(i) => {
+      let extension = String.slice(i + 1, String.length(filename), filename)
+      Option.unwrapWithDefault("application/octet-stream", Map.get(extension, mediaTypes))
+    },
+    None => "application/octet-stream",
+  }
+}
+
+let notFoundResponse = {
+  status: NotFound,
+  headers: Map.fromList([("Content-Type", "text/plain")]),
+  body: "404 Not Found"
+}
+
 export let withMiddlewares = (middlewares: List<Middleware>, handler) => {
   List.reduce((h, mw) => mw(h), handler, middlewares)
 }
@@ -98,9 +320,40 @@ export let text = val => {
   body: toString(val)
 }
 
+export let file = filePath => {
+  let result = File.pathOpen(File.pwdfd, [], filePath, [], [File.FdRead], [], [])
+
+  match (result) {
+    Err(_) => notFoundResponse,
+    Ok(fd) => {
+      let stats = Result.unwrap(File.fdFilestats(fd))
+      let (contents, _) = Result.unwrap(File.fdRead(fd, Int64.toNumber(stats.size)))
+      File.fdClose(fd)
+
+      {
+        status: HttpOk,
+        headers: Map.fromList([("Content-Type", getFileType(filePath))]),
+        body: contents
+      }
+    }
+  }
+}
+
+export let redirect = to => {
+  status: SeeOther,
+  headers: Map.fromList([("Location", to)]),
+  body: "Redirected to " ++ to
+}
+
 export let get = (path, handler: ReqHandler) => {
   { path, route: Endpoint(Get, handler) }
 }
+
+export let post = (path, handler: ReqHandler) => {
+  { path, route: Endpoint(Post, handler) }
+}
+
+// TODO add other request methods and all/several
 
 export let router = (path, routeHandlers: List<RouteHandler>) => {
   { path, route: Router(None, routeHandlers) }
@@ -121,7 +374,7 @@ let failWithMsgWithErr = (msg, err) => fail "ERROR " ++ msg ++ "; " ++ genericEr
 let outputResponse = response => {
   let { headers, body, status } = response
   Map.forEach((key, val) => {
-    let line = key ++ "=" ++ val
+    let line = key ++ ": " ++ val
     let safeLine = Array.reduce(
       (str, c) => str ++ (if (c == '\n') "\\n" else Char.toString(c)),
       "",
@@ -140,6 +393,8 @@ let failMethodNotAllowed = reqMethod => {
     headers: Map.fromList([("Content-Type", "text/plain")]),
     body: "405 Method Not Allowed"
   })
+  // Get
+  Process.exit(1)
   Get
 }
 
@@ -161,15 +416,38 @@ let readEnv = () => {
   }, vars))
 }
 
-let readBody = headers => {
-  let bodyLengthStr = match (Map.get("CONTENT_LENGTH", headers)) {
+let headerNormed = str => {
+  String.implode(Array.map(c => {
+    let code = Char.code(c)
+    if (code >= 65 && code <= 90) {
+      Char.fromCode(code + 32)
+    } else if (c == '-') {
+      '_'
+    } else {
+      c
+    }
+  }, String.explode(str)))
+}
+
+export let header = (key, req) => {
+  let key = headerNormed(key)
+  let httpVals = List.filter(((key, _)) => String.startsWith("HTTP_", key), Map.toList(req.wagiEnv))
+  let headers = Map.fromList(List.map(((key, val)) => {
+    let key = headerNormed(String.slice(5, String.length(key), key))
+    (key, val)
+  }, httpVals))
+  Map.get(key, headers)
+}
+
+let readBody = wagiEnv => {
+  let bodyLengthStr = match (Map.get("CONTENT_LENGTH", wagiEnv)) {
     Some(val) => val,
-    None => failWithMsg("Did not find \"CONTENT_LENGTH\" header in request")
+    None => failWithMsg("Did not find \"CONTENT_LENGTH\" in request")
   }
 
   let bodyLength = match (Number.parseInt(bodyLengthStr, 10)) {
     Ok(num) => num,
-    Err(err) => failWithMsgWithErr("Failed to parse \"CONTENT_LENGTH\" header from request to an integer", err)
+    Err(err) => failWithMsgWithErr("Failed to parse \"CONTENT_LENGTH\" from request to an integer", err)
   }
 
   match (File.fdRead(File.stdin, bodyLength)) {
@@ -178,15 +456,15 @@ let readBody = headers => {
   }
 }
 
-let getReqMethod = headers => {
-  match (Map.get("REQUEST_METHOD", headers)) {
+let getReqMethod = wagiEnv => {
+  match (Map.get("REQUEST_METHOD", wagiEnv)) {
     Some(reqMethod) => {
       match (toRequestMethod(reqMethod)) {
         Some(reqMethod) => reqMethod,
         None => failMethodNotAllowed(reqMethod)
       }
     },
-    _ => failWithMsg("Did not find \"REQUEST_METHOD\" header in request")
+    _ => failWithMsg("Did not find \"REQUEST_METHOD\" in request")
   }
 }
 
@@ -276,17 +554,11 @@ let findReqHandler = (reqMethod, path, routeHandler: RouteHandler) => {
   (findReqHandlerHelper(path, routeHandler), pathVars)
 }
 
-let notFoundResponse = {
-  status: NotFound,
-  headers: Map.fromList([("Content-Type", "text/plain")]),
-  body: "404 Not Found"
-}
-
 export let serve = (handler: RouteHandler) => {
   let (path, query) = readArgs()
-  let headers = readEnv()
-  let reqMethod = getReqMethod(headers)
-  let body = readBody(headers)
+  let wagiEnv = readEnv()
+  let reqMethod = getReqMethod(wagiEnv)
+  let body = readBody(wagiEnv)
 
   let (handler, params) = findReqHandler(reqMethod, path, handler)
   log("handler " ++ toString(handler))
@@ -295,9 +567,8 @@ export let serve = (handler: RouteHandler) => {
     Some(handler) => {
       let request = {
         variables: Map.make(),
-        _rawWagiEnv: headers,
+        wagiEnv,
         method: reqMethod,
-        headers,
         params,
         query,
         fullUrl: "",
