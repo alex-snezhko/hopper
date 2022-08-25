@@ -1,5 +1,7 @@
 /**
  * @module Hopper: An HTTP microframework for the Grain programming language.
+ * 
+ * Version 0.1.0
  */
 
 import Option from "option"
@@ -12,8 +14,10 @@ import String from "string"
 import Char from "char"
 import Regex from "regex"
 import Int64 from "int64"
+import Marshal from "marshal"
 import Process from "sys/process"
 import File from "sys/file"
+import Time from "sys/time"
 
 /**
  * @section Types: Type declarations included in the Hopper module.
@@ -35,17 +39,30 @@ export enum RequestMethod {
   Method(String)
 }
 
-/**
- * Represents an incoming HTTP request.
- */
-export record Request {
-  mut variables: Map.Map<String, String>,
+// TODO test with various percent encodings and whatnot
+
+export enum QueryParam {
+  SingleVal(String),
+  MultiVal(List<String>)
+}
+
+// /**
+//  * Represents an incoming HTTP request.
+//  */
+// export record Request {
+//   mut variables: Map.Map<String, String>,
+//   _wagiEnv: Map.Map<String, String>,
+//   method: RequestMethod,
+//   params: Map.Map<String, String>,
+//   query: Map.Map<String, QueryParam>,
+//   fullUrl: String,
+//   body: String,
+// }
+
+record RequestData {
   wagiEnv: Map.Map<String, String>,
-  method: RequestMethod,
   params: Map.Map<String, String>,
-  query: Map.Map<String, String>,
-  fullUrl: String,
-  body: String,
+  query: Map.Map<String, QueryParam>
 }
 
 /**
@@ -111,14 +128,28 @@ export enum Status {
   HttpStatus(Number)
 }
 
-/**
- * Represents an HTTP response.
- */
-export record Response {
-  status: Status,
+// /**
+//  * Represents an HTTP response.
+//  */
+// export record Response {
+//   status: Status,
+//   headers: Map.Map<String, String>,
+//   body: String,
+// }
+
+record ResponseData {
+  status: Status
+}
+
+record Message<a> {
+  message: a,
   headers: Map.Map<String, String>,
   body: String,
+  variables: Map.Map<String, Bytes>,
 }
+
+export type Request = Message<RequestData>
+export type Response = Message<ResponseData>
 
 /**
  * Represents an HTTP request handler which processes a request and returns a response.
@@ -141,7 +172,7 @@ export record RouteHandler {
 },
 export enum Route {
   Endpoint(RequestMethods, RequestHandler),
-  Router(Option<Middleware>, List<RouteHandler>)
+  Router(Middleware, List<RouteHandler>)
 }
 
 /**
@@ -269,6 +300,18 @@ export let statusCode = status => {
   }
 }
 
+let isStatusType = beginRange => status => {
+  let code = statusCode(status)
+  let endRange = beginRange + 100
+  code >= beginRange && code < endRange
+}
+
+export let isInformational = isStatusType(100)
+export let isSuccessful = isStatusType(200)
+export let isRedirection = isStatusType(300)
+export let isClientError = isStatusType(400)
+export let isServerError = isStatusType(500)
+
 // credit to https://github.com/deislabs/wagi-fileserver for the media types
 let mediaTypes = Map.fromList([
   // Text formats
@@ -390,14 +433,18 @@ export let guessMimeType = fileName => {
   }
 }
 
-// export let withMiddlewares = (middlewares: List<Middleware>, handler) => {
-//   List.reduce((h, mw) => mw(h), handler, middlewares)
-// }
-
+export let middlewares: List<Middleware> -> Middleware = mws => handler => {
+  List.reduceRight((mw, handler) => mw(handler), handler, mws)
+}
 // TODO add middlewares: authentication, logging, etc
 
-// TODO look into adding cookies
-// TODO CORS
+// TODO add cookies
+// TODO implement all suggestions in https://datatracker.ietf.org/doc/html/rfc3875
+// TODO percent encoding and such
+
+export let response = (status, headers, body) => {
+  { status, headers, body }
+}
 
 /**
  * Creates a new `Response` from an existing response, but with the response status code changed.
@@ -426,6 +473,10 @@ export let text = body => {
 /**
  * Creates a new OK `Response` with a JSON string body and `"application/json"` Content-Type.
  * 
+ * Note: the argument type will likely be changed to a more friendly JSON
+ * representation once https://github.com/grain-lang/grain/pull/1133 gets
+ * merged.
+ * 
  * @param body: The JSON body to create the `Response` with
  * @returns A new JSON `Response`
  */
@@ -448,7 +499,12 @@ export let contentType = (contentType, body) => {
   body
 }
 
-// TODO consider streams
+export let notFound = {
+  status: NotFound,
+  headers: Map.fromList([("Content-Type", "text/plain")]),
+  body: "Route Not Found"
+}
+
 /**
  * Creates a new `Response` from a static file on the server at the given path.
  * 
@@ -478,7 +534,7 @@ export let file = filePath => {
   }
 }
 
-// TODO test
+// TODO consider removing external redirect and merging into one
 /**
  * Creates a new redirection `Response` to another route on the server.
  * 
@@ -487,7 +543,7 @@ export let file = filePath => {
  * @returns A new redirection `Response` with status code "302 Found"
  */
 export let redirect = (path, req) => {
-  let item = key => Option.unwrap(Map.get(key, req.wagiEnv))
+  let item = key => Option.unwrap(Map.get(key, req._wagiEnv))
   let protocol = if (String.startsWith("https://", item("X_FULL_URL"))) "https://" else "http://"
   let baseUrl = protocol ++ item("SERVER_NAME") ++ ":" ++ item("SERVER_PORT")
   {
@@ -564,12 +620,14 @@ export let all = (path, handler) => {
   routeHandler(path, All, handler)
 }
 
-export let router = (path, routeHandlers) => {
-  { path, route: Router(None, routeHandlers) }
+// TODO rename Router variant to Routes or something
+// TODO integrate testing
+export let scope = (path, routeHandlers) => {
+  { path, route: Router(identity, routeHandlers) }
 }
 
-export let routerWithMiddleware = (path, middleware, routeHandlers) => {
-  { path, route: Router(Some(middleware), routeHandlers) }
+export let scopeWithMiddleware = (path, middleware, routeHandlers) => {
+  { path, route: Router(middleware, routeHandlers) }
 }
 
 let genericErrMsg = "make sure you are running in a properly configured WAGI environment"
@@ -609,65 +667,155 @@ let readEnv = () => {
   }, vars))
 }
 
-let headerNormed = str => {
+let getReqMethod = wagiEnv => {
+  match (Map.get("REQUEST_METHOD", wagiEnv)) {
+    Some(reqMethod) => stringToMethod(reqMethod),
+    _ => failWithMsg("Did not find \"REQUEST_METHOD\" in request")
+  }
+}
+
+let toLower = str => {
   String.implode(Array.map(c => {
     let code = Char.code(c)
-    if (code >= 65 && code <= 90) {
-      Char.fromCode(code + 32)
-    } else if (c == '-') {
-      '_'
-    } else {
-      c
-    }
+    if (code >= 65 && code <= 90) Char.fromCode(code + 32) else c
   }, String.explode(str)))
 }
 
-/**
- * Extracts an HTTP header from the given request with the given key, case-insensitive.
- * 
- * @param key: The header name to get
- * @param req: The incoming `Request`
- * 
- * @example Hopper.header("Content-Type", req) == Hopper.header("content-type", req) // true
- */
-export let header = (key, req) => {
-  let key = headerNormed(key)
-  let httpVals = List.filter(((key, _)) => String.startsWith("HTTP_", key), Map.toList(req.wagiEnv))
-  let headers = Map.fromList(List.map(((key, val)) => {
-    let key = headerNormed(String.slice(5, String.length(key), key))
-    (key, val)
-  }, httpVals))
-  Map.get(key, headers)
+let headerNormed = str => {
+  String.implode(Array.map(
+    c => if (c == '-') '_' else c,
+    String.explode(toLower(str))
+  ))
 }
 
-/**
- * Parses an HTTP request with `Content-Type: application/x-www-form-urlencoded`
- * and form data into a `Map` mapping form item names to their values. The
- * keys/values are expected to be in the URL query string on GET requests and in
- * the body on POST requests.
- * 
- * @param req: The incoming `Request`
- * @returns A `Map` mapping form item names to their values
- */
-export let parseForm = req => {
-  match (req.method) {
-    Get => req.query,
-    Post when header("Content-Type", req) == Some("application/x-www-form-urlencoded") => {
-      let parts = String.split("&", req.body)
-      Map.fromArray(Array.map(part => {
-        match (String.indexOf("=", part)) {
-          Some(i) => {
-            let partName = String.slice(0, i, part)
-            let partVal = String.slice(i + 1, String.length(part), part)
-            (partName, partVal)
-          },
-          None => (part, "")
-        }
-      }, parts))
-    },
-    _ => Map.make(),
+export let joinedQuery = (key, delim, req) => {
+  Option.map(val => match (val) {
+    SingleVal(val) => val,
+    MultiVal(vals) => List.join(delim, vals)
+  }, Map.get(key, req.query))
+}
+
+// /**
+//  * Extracts an HTTP header from the given request with the given key, case-insensitive.
+//  * 
+//  * @param key: The header name to get
+//  * @param req: The incoming `Request`
+//  * 
+//  * @example Hopper.header("Content-Type", req) == Hopper.header("content-type", req) // true
+//  */
+// export let header = (key, req) => {
+//   let key = headerNormed(key)
+//   let httpVals = List.filter(((key, _)) => String.startsWith("HTTP_", key), Map.toList(req._wagiEnv))
+//   let headers = Map.fromList(List.map(((key, val)) => {
+//     let key = headerNormed(String.slice(5, String.length(key), key))
+//     (key, val)
+//   }, httpVals))
+//   Map.get(key, headers)
+// }
+
+export let path = req => {
+  Map.get("PATH_INFO", req._wagiEnv)
+}
+
+export let param = (key, req) => {
+  Option.expect("URL path param " ++ key ++ " expected to exist on request but did not", Map.get(key, req.params))
+}
+
+export let method = req => {
+  getReqMethod(req._wagiEnv)
+}
+
+export let header = (key, msg) => {
+  let key = headerNormed(key)
+  let header = List.find(
+    ((headerKey, val)) => headerNormed(headerKey) == key,
+    Map.toList(msg.headers)
+  )
+  match (header) {
+    Some((_, val)) => Some(val),
+    None => None
   }
 }
+
+export let setVariable = (key, value, msg) => {
+  Map.set(key, Marshal.marshal(value), msg.variables)
+}
+
+export let getVariable = (key, msg) => {
+  Marshal.unmarshal(Map.get(key, msg.variables))
+}
+
+// export let withLogging: Middleware = next => req => {
+//   let begin = Time.monotonicTime()
+//   next(req)
+//   let end = Time.monotonicTime()
+//   log(methodToString(req.method) ++ " " ++ req.fullUrl ++ " ")
+// }
+
+// TODO finish
+export let withCors = next => req => {
+  let res = next(req)
+  // handle CORS "preflight" request
+  if (res == notFound && req.method == Options) {
+    { status: NoContent, headers: Map.fromList([
+      ("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE"),
+      ("Access-Control-Allow-Origin", "*"),
+      ("Access-Control-Allow-Headers", "*")
+    ]), body: "" }
+  } else {
+    res
+  }
+}
+// /**
+//  * Parses an HTTP request with `Content-Type: application/x-www-form-urlencoded`
+//  * and form data into a `Map` mapping form item names to their values. The
+//  * keys/values are expected to be in the URL query string on GET requests and in
+//  * the body on POST requests.
+//  * 
+//  * @param req: The incoming `Request`
+//  * @returns A `Map` mapping form item names to their values
+//  */
+// export let parseForm = req => {
+//   match (req.method) {
+//     Get => req.query,
+//     Post when header("Content-Type", req) == Some("application/x-www-form-urlencoded") => {
+//       let parts = String.split("&", req.body)
+//       Map.fromArray(Array.map(part => {
+//         match (String.indexOf("=", part)) {
+//           Some(i) => {
+//             let partName = String.slice(0, i, part)
+//             let partVal = String.slice(i + 1, String.length(part), part)
+//             (partName, partVal)
+//           },
+//           None => (part, "")
+//         }
+//       }, parts))
+//     },
+//     _ => Map.make(),
+//   }
+// }
+
+// let parseContentDispositionHeader = headers => {
+//   let contentDispositionLine = List.find(
+//     line => String.startsWith("content-disposition", toLower(line)),
+//     headers
+//   )
+//   match (contentDispositionLine) {
+//     None => None,
+//     Some(contentDispositionLine) => {
+//       let regex = Result.unwrap(Regex.make("content-disposition:\\s*form-data;\\s*name=\"(.+)\""))
+//       match (Regex.find(regex, toLower(contentDispositionLine))) {
+//         None => None,
+//         Some(reMatch) => {
+//           let (nameBeginI, nameEndI) = reMatch.groupPosition(1)
+//           let name = String.slice(nameBeginI, nameEndI, contentDispositionLine)
+//           Some(name)
+//         }
+//       }
+
+//     }
+//   }
+// }
 
 // let readMultipart = (body, boundary) => {
 //   let lines = Array.toList(String.split("\n", body))
@@ -685,8 +833,14 @@ export let parseForm = req => {
 //     lines
 //   )
 //   List.reduce(
-//     part => {
-      
+//     partLines => {
+//       let lineEmpty = line => String.strip(line) == ""
+
+//       let headers = List.takeWhile(line => !lineEmpty(line), partLines)
+//       let body = List.dropWhile(lineEmpty, List.dropWhile(line => !lineEmpty(line), partLines))
+
+//       let itemName = parseContentDispositionHeader(headers)
+//       let bodyStr = String.join("\n", body)
 //     },
 //     parts
 //   )
@@ -729,19 +883,13 @@ let readBody = wagiEnv => {
   }
 }
 
-let getReqMethod = wagiEnv => {
-  match (Map.get("REQUEST_METHOD", wagiEnv)) {
-    Some(reqMethod) => stringToMethod(reqMethod),
-    _ => failWithMsg("Did not find \"REQUEST_METHOD\" in request")
-  }
-}
-
 let readArgs = () => {
   match (Process.argv()) {
     Ok(args) => {
       let [path, ...queryParamList] = Array.toList(args)
-      let queryParamMap = Map.fromList(List.map(
-        param => match (String.indexOf("=", param)) {
+      let queryParamMap = Map.make()
+      List.forEach(param => {
+        let (param, val) = match (String.indexOf("=", param)) {
           // some query params may only have a key, set value to empty string in this case
           None => (param, ""),
           Some(i) => {
@@ -749,75 +897,127 @@ let readArgs = () => {
             let varVal = String.slice(i + 1, String.length(param), param)
             (varName, varVal)
           }
-        },
-        queryParamList
-      ))
+        }
+        match (Map.get(param, queryParamMap)) {
+          None => Map.set(param, SingleVal(val), queryParamMap),
+          Some(SingleVal(currVal)) => Map.set(param, MultiVal([currVal, val]), queryParamMap),
+          Some(MultiVal(currVals)) => Map.set(param, MultiVal(List.append(currVals, [val])), queryParamMap)
+        }
+      }, queryParamList)
       (path, queryParamMap)
     },
     Err(err) => failWithMsgWithErr("Unable to read system arguments", err)
   }
 }
+    
+// TODO maybe normalize urls or something to make more robust; also currently trailing slash does not work if in URL
+let matchRestRegex = Result.unwrap(Regex.make("/\\*$"))
+// a bit of a hack to not capture regex groups specified in route.
+// if something is going wrong with matching patterns it may be due to this
+let captureGroupRegex = Result.unwrap(Regex.make("(?<!\\\\)\\("))
+let replaceWithCapturesRegex = Result.unwrap(Regex.make("<\\w+\\(\\?:(.*)\\)>"))
+let paramRegex = Result.unwrap(Regex.make("<\\w+>"))
+let customParamRegex = Result.unwrap(Regex.make("<\\w+\\((.*)\\)>"))
+let paramNameRegex = Result.unwrap(Regex.make("<(\\w+)>"))
+let customParamNameRegex = Result.unwrap(Regex.make("<(\\w+)\\(.*\\)>"))
+let slashAtEndRegex = Result.unwrap(Regex.make("/$"))
+let noDollarSignAtEnd = Result.unwrap(Regex.make("(?<!\\$)$"))
+
+let preprocessRouteRegex = route => {
+  let routeRegex = List.reduce(
+    (str, (regex, replaceWith)) => {
+      // log("rr " ++ str)
+      Regex.replaceAll(regex, str, replaceWith)
+    },
+    route,
+    [
+      (matchRestRegex, "/.*"),
+      (matchRestRegex, "/.*"),
+      (captureGroupRegex, "(?:"),
+      (replaceWithCapturesRegex, "($1)"),
+      (customParamRegex, "($1)"),
+      (paramRegex, "(\\w+)"),
+      (slashAtEndRegex, ""),
+      (noDollarSignAtEnd, "$"),
+    ]
+  )
+
+  match (Regex.make(routeRegex)) {
+    Err(_) => failWithMsg("Invalid route path " ++ route),
+    Ok(routeRegex) => routeRegex
+  }
+}
 
 let findReqHandler = (reqMethod, path, routeHandler) => {
   let pathVars = Map.make()
+  let notFoundHandler = req => notFound
 
   let rec findReqHandlerHelper = (pathSegment, routeHandler) => {
-    // TODO use different strategy and allow expaning of whole path
-    let paramRegex = Result.unwrap(Regex.make(":\\w+"))
     let paramNames = List.map(
-      (matchRes: Regex.MatchResult) => {
-        let str = Option.unwrap(matchRes.group(0))
-        // remove the colon at the beginning
-        String.slice(1, String.length(str), str)
-      },
-      Regex.findAll(paramRegex, routeHandler.path)
+      (matchRes: Regex.MatchResult) => Option.unwrap(matchRes.group(1)),
+      List.append(
+        Regex.findAll(paramNameRegex, routeHandler.path),
+        Regex.findAll(customParamNameRegex, routeHandler.path)
+      )
     )
-    let routeWithVarCaptures = Regex.replaceAll(paramRegex, routeHandler.path, "(\\w+)")
-    let pathMatch = match (Regex.make(routeWithVarCaptures)) {
-      Err(_) => failWithMsg("Invalid route path " ++ pathSegment),
-      Ok(re) => Regex.find(re, pathSegment)
-    }
-    Option.flatMap((pathMatch: Regex.MatchResult) => {
-      let (thisPathStartI, thisPathEndI) = Option.unwrap(pathMatch.groupPosition(0))
-      if (thisPathStartI != 0) {
-        None
-      } else {
-        let matchedSegment = Option.unwrap(pathMatch.group(0))
-        if (pathMatch.numGroups > 1) {
-          let [_, ...paramVals] = Array.toList(Array.map(grp => Option.unwrap(grp), pathMatch.allGroups()))
-          List.forEach(((paramName, paramVal)) => {
-            Map.set(paramName, paramVal, pathVars)
-          }, List.zip(paramNames, paramVals))
-        }
-        let reqHandler = match (routeHandler.route) {
-          Endpoint(handlerMethods, reqHandler) => match (handlerMethods) {
-            All => Some(reqHandler),
-            Methods(methods) when List.contains(reqMethod, methods) => Some(reqHandler),
-            _ => None,
-          },
-          Router(middleware, routeHandlers) => {
-            let mut nextPathSegment = String.slice(thisPathEndI, String.length(pathSegment), pathSegment)
-            if (!String.startsWith("/", nextPathSegment)) {
-              nextPathSegment = "/" ++ nextPathSegment
-            }
-            let reqHandler = List.reduce(
-              (found, routeHandler) => match (found) {
-                Some(_) => found,
-                None => findReqHandlerHelper(nextPathSegment, routeHandler)
-              },
-              None,
-              routeHandlers
-            )
-            let val = match ((middleware, reqHandler)) {
-              (Some(middleware), Some(reqHandler)) => Some(middleware(reqHandler)),
-              _ => reqHandler
-            }
-            val
+
+    let routeRegex = preprocessRouteRegex(routeHandler.path)
+    let pathMatch = Regex.find(routeRegex, pathSegment)
+    match (pathMatch) {
+      None => notFoundHandler,
+      Some(pathMatch) => {
+        let (thisPathStartI, thisPathEndI) = Option.unwrap(pathMatch.groupPosition(0))
+        if (thisPathStartI != 0) {
+          notFoundHandler
+        } else {
+          let matchedSegment = Option.unwrap(pathMatch.group(0))
+          log("matchSeg " ++ matchedSegment)
+          if (pathMatch.numGroups > 1) {
+            let [_, ...paramVals] = Array.toList(Array.map(grp => Option.unwrap(grp), pathMatch.allGroups()))
+            List.forEach(((paramName, paramVal)) => {
+              Map.set(paramName, paramVal, pathVars)
+            }, List.zip(paramNames, paramVals))
           }
+          let reqHandler = match (routeHandler.route) {
+            Endpoint(handlerMethods, reqHandler) => {
+              // if there is more left to the path e.g. if the route matcher is
+              // /hi but the URL hit is /hi/hello, then consider it not matched
+              if (thisPathEndI != String.length(pathSegment)) {
+                notFoundHandler
+              } else {
+                match (handlerMethods) {
+                  All => reqHandler,
+                  Methods(methods) when List.contains(reqMethod, methods) => reqHandler,
+                  _ => notFoundHandler,
+                }
+              }
+            },
+            Router(middleware, routeHandlers) => {
+              let nextPathSegment = String.slice(thisPathEndI, String.length(pathSegment), pathSegment)
+              let nextPathSegment = if (!String.startsWith("/", nextPathSegment)) "/" ++ nextPathSegment else nextPathSegment
+              let reqHandler = List.reduce(
+                (found, routeHandler) => {
+                  if (found == notFoundHandler) {
+                    findReqHandlerHelper(nextPathSegment, routeHandler)
+                  } else {
+                    found
+                  }
+                },
+                notFoundHandler,
+                routeHandlers
+              )
+              let nfc = notFoundHandler
+              log("not this one " ++ toString(notFoundHandler == reqHandler))
+              log("this one " ++ toString(nfc == notFoundHandler))
+              let m = middleware(reqHandler)
+              log("did not blow up")
+              m
+            }
+          }
+          reqHandler
         }
-        reqHandler
       }
-    }, pathMatch)
+    }
   }
 
   (findReqHandlerHelper(path, routeHandler), pathVars)
@@ -831,29 +1031,20 @@ let findReqHandler = (reqMethod, path, routeHandler) => {
 export let serve = routeHandler => {
   let (path, query) = readArgs()
   let wagiEnv = readEnv()
-  let reqMethod = getReqMethod(wagiEnv)
-  let body = readBody(wagiEnv)
 
   // TODO handling of params with same names e.g. asdf=a&asdf=b
-  let (reqHandler, params) = findReqHandler(reqMethod, path, routeHandler)
-  let response = match (reqHandler) {
-    None => {
-      status: NotFound,
-      headers: Map.fromList([("Content-Type", "text/plain")]),
-      body: "404 Not Found"
-    },
-    Some(handler) => {
-      let request = {
-        variables: Map.make(),
-        wagiEnv,
-        method: reqMethod,
-        params,
-        query,
-        fullUrl: "",
-        body
-      }
-      handler(request)
-    }
+  let (reqHandler, params) = findReqHandler(getReqMethod(wagiEnv), path, routeHandler)
+  log("reqHandler " ++ toString(reqHandler))
+  // let reqHandler = match (reqHandler) {
+  //   None => req => notFound,
+  //   Some(handler) => handler
+  // }
+  let request = {
+    variables: Map.make(),
+    _wagiEnv: wagiEnv,
+    query,
+    body: readBody(wagiEnv)
   }
+  let response = reqHandler(request)
   outputResponse(response)
 }
