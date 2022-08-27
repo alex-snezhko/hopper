@@ -4,6 +4,8 @@
  * Version 0.1.0
  */
 
+// this will likely get split into multiple files once Grain's module system becomes more advanced
+
 import Option from "option"
 import Result from "result"
 import Number from "number"
@@ -33,7 +35,6 @@ export enum RequestMethod {
   Delete,
   Head,
   Patch,
-  Connect,
   Options,
   Trace,
   Method(String)
@@ -41,7 +42,7 @@ export enum RequestMethod {
 
 // TODO test with various percent encodings and whatnot
 
-export enum QueryParam {
+export enum OneOrMany {
   SingleVal(String),
   MultiVal(List<String>)
 }
@@ -62,7 +63,7 @@ export enum QueryParam {
 record RequestData {
   wagiEnv: Map.Map<String, String>,
   params: Map.Map<String, String>,
-  query: Map.Map<String, QueryParam>
+  query: Map.Map<String, OneOrMany>
 }
 
 /**
@@ -166,13 +167,13 @@ enum RequestMethods {
   All
 }
 
-export record RouteHandler {
+record Route {
   path: String,
-  route: Route,
+  routeHandler: RouteHandler,
 },
-export enum Route {
+enum RouteHandler {
   Endpoint(RequestMethods, RequestHandler),
-  Router(Middleware, List<RouteHandler>)
+  Router(Middleware, List<Route>)
 }
 
 /**
@@ -204,7 +205,6 @@ export let stringToMethod = str => {
     "DELETE" => Delete,
     "HEAD" => Head,
     "PATCH" => Patch,
-    "CONNECT" => Connect,
     "OPTIONS" => Options,
     "TRACE" => Trace,
     _ => Method(str)
@@ -225,7 +225,6 @@ export let methodToString = method => {
     Delete => "DELETE",
     Head => "HEAD",
     Patch => "PATCH",
-    Connect => "CONNECT",
     Options => "OPTIONS",
     Trace => "TRACE",
     Method(str) => str,
@@ -437,25 +436,33 @@ export let middlewares: List<Middleware> -> Middleware = mws => handler => {
   List.reduceRight((mw, handler) => mw(handler), handler, mws)
 }
 // TODO add middlewares: authentication, logging, etc
+// TODO look into CGI section 3.1, 4.1.1 to determine how auth could be done
 
 // TODO add cookies
 // TODO implement all suggestions in https://datatracker.ietf.org/doc/html/rfc3875
-// TODO percent encoding and such
 
+/**
+ * Creates a new `Response` with a status, headers, and body.
+ * 
+ * @param status: The desired HTTP status
+ * @param headers: The desired HTTP headers
+ * @param body: The body string to create the `Response` with
+ * @returns A new `Response` with the given values
+ */
 export let response = (status, headers, body) => {
-  { status, headers, body }
+  { message: { status, }, variables: Map.make(), headers, body }: Response
 }
 
 /**
  * Creates a new `Response` from an existing response, but with the response status code changed.
  * 
  * @param status: The desired HTTP status
- * @param response: The base response
+ * @param res: The base response
  * @returns A new `Response` with the desired HTTP status
  */
-export let status = (status, response) => {
-  let { headers, body, _ } = response
-  { status, headers, body }
+export let status = (status: Status, res: Response) => {
+  let { headers, body, _ } = res
+  response(status, headers, body)
 }
 
 /**
@@ -464,11 +471,7 @@ export let status = (status, response) => {
  * @param body: The text body to create the `Response` with
  * @returns A new text `Response`
  */
-export let text = body => {
-  status: HttpOk,
-  headers: Map.fromList([("Content-Type", "text/plain")]),
-  body
-}
+export let text = body => response(HttpOk, Map.fromList([("Content-Type", "text/plain")]), body)
 
 /**
  * Creates a new OK `Response` with a JSON string body and `"application/json"` Content-Type.
@@ -480,11 +483,7 @@ export let text = body => {
  * @param body: The JSON body to create the `Response` with
  * @returns A new JSON `Response`
  */
-export let json = body => {
-  status: HttpOk,
-  headers: Map.fromList([("Content-Type", "application/json")]),
-  body
-}
+export let json = body => response(HttpOk, Map.fromList([("Content-Type", "application/json")]), body)
 
 /**
  * Creates a new OK `Response` with the specified content type.
@@ -493,16 +492,16 @@ export let json = body => {
  * @param body: The body of the response
  * @returns A new `Response` with the given content type
  */
-export let contentType = (contentType, body) => {
-  status: HttpOk,
-  headers: Map.fromList([("Content-Type", contentType)]),
-  body
-}
+export let contentType = (contentType, body) => response(HttpOk, Map.fromList([("Content-Type", contentType)]), body)
 
-export let notFound = {
-  status: NotFound,
-  headers: Map.fromList([("Content-Type", "text/plain")]),
-  body: "Route Not Found"
+let notFound = response(NotFound, Map.fromList([("Content-Type", "text/plain")]), "Route not found")
+let methodNotSupported = supportedMethods => {
+  let allowed = List.join(", ", List.map(methodToString, supportedMethods))
+  response(
+    MethodNotAllowed,
+    Map.fromList([("Content-Type", "text/plain"), ("Allow", allowed)]),
+    "Method not allowed for this route; allowed methods are " ++ allowed
+  )
 }
 
 /**
@@ -515,26 +514,17 @@ export let file = filePath => {
   let result = File.pathOpen(File.pwdfd, [], filePath, [], [File.FdFilestats, File.FdRead], [], [])
 
   match (result) {
-    Err(_) => {
-      status: NotFound,
-      headers: Map.fromList([("Content-Type", "text/plain")]),
-      body: "404 File Not Found"
-    },
+    Err(_) => response(NotFound, Map.fromList([("Content-Type", "text/plain")]), "404 File Not Found"),
     Ok(fd) => {
       let stats = Result.unwrap(File.fdFilestats(fd))
       let (contents, _) = Result.unwrap(File.fdRead(fd, Int64.toNumber(stats.size)))
       File.fdClose(fd)
 
-      {
-        status: HttpOk,
-        headers: Map.fromList([("Content-Type", guessMimeType(filePath))]),
-        body: contents
-      }
+      response(HttpOk, Map.fromList([("Content-Type", guessMimeType(filePath))]), contents)
     }
   }
 }
 
-// TODO consider removing external redirect and merging into one
 /**
  * Creates a new redirection `Response` to another route on the server.
  * 
@@ -542,15 +532,11 @@ export let file = filePath => {
  * @param req: The incoming `Request`
  * @returns A new redirection `Response` with status code "302 Found"
  */
-export let redirect = (path, req) => {
-  let item = key => Option.unwrap(Map.get(key, req._wagiEnv))
+export let redirectLocal = (path, req: Request) => {
+  let item = key => Option.unwrap(Map.get(key, req.message.wagiEnv))
   let protocol = if (String.startsWith("https://", item("X_FULL_URL"))) "https://" else "http://"
   let baseUrl = protocol ++ item("SERVER_NAME") ++ ":" ++ item("SERVER_PORT")
-  {
-    status: Found,
-    headers: Map.fromList([("Location", baseUrl ++ path)]),
-    body: "Redirected to " ++ path
-  }
+  response(Found, Map.fromList([("Location", baseUrl ++ path)]), "")
 }
 
 /**
@@ -559,97 +545,199 @@ export let redirect = (path, req) => {
  * @param url: The URL to redirect to
  * @returns A new redirection `Response` with status code "302 Found"
  */
-export let redirectExternal = url => {
-  status: Found,
-  headers: Map.fromList([("Location", url)]),
-  body: "Redirected to " ++ url
-}
+export let redirectExternal = url => response(Found, Map.fromList([("Location", url)]), "")
 
-let routeHandler = (path, methods, handler) => {
-  { path, route: Endpoint(methods, handler) }
+let createRoute = (path, methods, handler) => {
+  { path, routeHandler: Endpoint(methods, handler) }
 }
 
 /**
- * Creates a new `RouteHandler` for handling GET requests at a path.
+ * Creates a new `Route` for handling GET requests at a path.
  * 
  * @param path: The relative path the request handler will reside on
  * @param handler: The `RequestHandler` responsible for handling the request
- * @returns A new `RouteHandler`
+ * @returns A new `Route` handling GET requests at a path
  */
 export let get = (path, handler) => {
-  routeHandler(path, Methods([Get]), handler)
+  createRoute(path, Methods([Get]), handler)
 }
 
+/**
+ * Creates a new `Route` for handling POST requests at a path.
+ * 
+ * @param path: The relative path the request handler will reside on
+ * @param handler: The `RequestHandler` responsible for handling the request
+ * @returns A new `Route` handling POST requests at a path
+ */
 export let post = (path, handler) => {
-  routeHandler(path, Methods([Post]), handler)
+  createRoute(path, Methods([Post]), handler)
 }
 
+/**
+ * Creates a new `Route` for handling PUT requests at a path.
+ * 
+ * @param path: The relative path the request handler will reside on
+ * @param handler: The `RequestHandler` responsible for handling the request
+ * @returns A new `Route` handling PUT requests at a path
+ */
 export let put = (path, handler) => {
-  routeHandler(path, Methods([Put]), handler)
+  createRoute(path, Methods([Put]), handler)
 }
 
+/**
+ * Creates a new `Route` for handling DELETE requests at a path.
+ * 
+ * @param path: The relative path the request handler will reside on
+ * @param handler: The `RequestHandler` responsible for handling the request
+ * @returns A new `Route` handling DELETE requests at a path
+ */
 export let delete = (path, handler) => {
-  routeHandler(path, Methods([Delete]), handler)
+  createRoute(path, Methods([Delete]), handler)
 }
 
+/**
+ * Creates a new `Route` for handling HEAD requests at a path.
+ * 
+ * @param path: The relative path the request handler will reside on
+ * @param handler: The `RequestHandler` responsible for handling the request
+ * @returns A new `Route` handling HEAD requests at a path
+ */
 export let head = (path, handler) => {
-  routeHandler(path, Methods([Head]), handler)
+  createRoute(path, Methods([Head]), handler)
 }
 
+/**
+ * Creates a new `Route` for handling PATCH requests at a path.
+ * 
+ * @param path: The relative path the request handler will reside on
+ * @param handler: The `RequestHandler` responsible for handling the request
+ * @returns A new `Route` handling PATCH requests at a path
+ */
 export let patch = (path, handler) => {
-  routeHandler(path, Methods([Patch]), handler)
+  createRoute(path, Methods([Patch]), handler)
 }
 
-export let connect = (path, handler) => {
-  routeHandler(path, Methods([Connect]), handler)
-}
-
+/**
+ * Creates a new `Route` for handling OPTIONS requests at a path.
+ * 
+ * @param path: The relative path the request handler will reside on
+ * @param handler: The `RequestHandler` responsible for handling the request
+ * @returns A new `Route` handling OPTIONS requests at a path
+ */
 export let options = (path, handler) => {
-  routeHandler(path, Methods([Options]), handler)
+  createRoute(path, Methods([Options]), handler)
 }
 
+/**
+ * Creates a new `Route` for handling TRACE requests at a path.
+ * 
+ * @param path: The relative path the request handler will reside on
+ * @param handler: The `RequestHandler` responsible for handling the request
+ * @returns A new `Route` handling TRACE requests at a path
+ */
 export let trace = (path, handler) => {
-  routeHandler(path, Methods([Trace]), handler)
+  createRoute(path, Methods([Trace]), handler)
 }
 
-export let methods = (methods, path, handler) => {
-  routeHandler(path, Methods(methods), handler)
+/**
+ * Creates a new `Route` for handling requests at a path.
+ * 
+ * @param method: The HTTP method the route will handle
+ * @param path: The relative path the request handler will reside on
+ * @param handler: The `RequestHandler` responsible for handling the request
+ * @returns A new `Route` handling requests at a path
+ */
+export let route = (method, path, handler) => {
+  createRoute(path, Methods([method]), handler)
 }
 
+/**
+ * Creates a new `Route` for handling requests at a path with multiple allowed HTTP methods.
+ * 
+ * @param methods: The HTTP methods the route will handle
+ * @param path: The relative path the request handler will reside on
+ * @param handler: The `RequestHandler` responsible for handling the request
+ * @returns A new `Route` handling requests at a path
+ */
+export let methodsRoute = (methods, path, handler) => {
+  createRoute(path, Methods(methods), handler)
+}
+
+/**
+ * Creates a new `Route` for handling requests at a path for all HTTP methods.
+ * 
+ * @param path: The relative path the request handler will reside on
+ * @param handler: The `RequestHandler` responsible for handling the request
+ * @returns A new `Route` handling requests at a path
+ */
 export let all = (path, handler) => {
-  routeHandler(path, All, handler)
+  createRoute(path, All, handler)
 }
 
-// TODO rename Router variant to Routes or something
+/**
+ * Creates a new `Route` composed of multiple sub-routes defined relative to
+ * the path given. A middleware is also applied to all requests in the scope.
+ * 
+ * @param path: The relative path the request handler will reside on
+ * @param middleware: The middleware to apply to the routes in the scope
+ * @param routes: The `Route`s composing the scope
+ * @returns A new `Route` handling requests rooted from the path
+ */
+export let scopeWithMiddleware = (path, middleware, routes) => {
+  { path, routeHandler: Router(middleware, routes) }
+}
+
 // TODO integrate testing
-export let scope = (path, routeHandlers) => {
-  { path, route: Router(identity, routeHandlers) }
-}
-
-export let scopeWithMiddleware = (path, middleware, routeHandlers) => {
-  { path, route: Router(middleware, routeHandlers) }
+/**
+ * Creates a new `Route` composed of multiple sub-routes defined relative to the path given.
+ * 
+ * @param path: The relative path the request handler will reside on
+ * @param routes: The `Route`s composing the scope
+ * @returns A new `Route` handling requests rooted from the path
+ */
+export let scope = (path, routes) => {
+  scopeWithMiddleware(path, identity, routes)
 }
 
 let genericErrMsg = "make sure you are running in a properly configured WAGI environment"
 let failWithMsg = msg => fail "ERROR " ++ msg ++ "; " ++ genericErrMsg
 let failWithMsgWithErr = (msg, err) => fail "ERROR " ++ msg ++ "; " ++ genericErrMsg ++ "; err " ++ toString(err)
 
-let outputResponse = response => {
-  let { headers, body, status } = response
-  Map.forEach((key, val) => {
-    let line = key ++ ": " ++ val
-    let safeLine = Array.reduce(
+let outputResponse = (res: Response) => {
+  let { headers, body, message: { status }, _ } = res
+  // script must specify Content-Type per CGI v1.1 spec, so default to
+  // application/octet-stream if one was not given
+  Map.update("Content-Type", val => match (val) {
+    None => Some("application/octet-stream"),
+    _ => val
+  }, headers)
+  Map.set("Status", toString(statusCode(status)), headers)
+
+  let safeHeaders = Map.fromList(List.map(((key, val)) => {
+    // remove any newline characters from headers because that will cause
+    // header values to be written to body (since a blank line separates
+    // headers from body in CGI spec)
+    let makeSafe = str => Array.reduce(
       (str, c) => str ++ (if (c == '\n') "\\n" else Char.toString(c)),
       "",
-      String.explode(line)
+      String.explode(str)
     )
-    print(safeLine)
-  }, headers)
-  print("Status: " ++ toString(statusCode(status)) ++ "\n")
-  print(body)
+    (makeSafe(key), makeSafe(val))
+  }, Map.toList(headers)))
+
+  // redirects should not specify additional headers per CGI spec
+  match (Map.get("Location", safeHeaders)) {
+    Some(location) => print("Location: " ++ location ++ "\n\n"),
+    None => {
+      Map.forEach((key, val) => print(key ++ ": " ++ val), safeHeaders)
+      // empty line separates headers from body per CGI spec
+      print("")
+      print(body)
+    }
+  }
 }
 
-let readEnv = () => {
+let getWagiEnv = () => {
   let vars = match (Process.env()) {
     Ok(vars) => vars,
     Err(err) => failWithMsgWithErr("Unable to read system environment variables", err)
@@ -665,6 +753,15 @@ let readEnv = () => {
       None => failWithMsg("Error processing environment variable " ++ var)
     }
   }, vars))
+}
+
+let getHeaders = wagiEnv => {
+  let headerEntries = List.filter(((key, _)) => String.startsWith("HTTP_", key), Map.toList(wagiEnv))
+  let headerKeyVals = List.map(((key, val)) => {
+    let key = String.slice(5, String.length(key), key)
+    (key, val)
+  }, headerEntries)
+  Map.fromList(headerKeyVals)
 }
 
 let getReqMethod = wagiEnv => {
@@ -688,43 +785,77 @@ let headerNormed = str => {
   ))
 }
 
-export let joinedQuery = (key, delim, req) => {
+/**
+ * Fetches a URL query parameter with the given name.
+ * 
+ * @param key: The name of the parameter to fetch the value of
+ * @param req: The request to fetch the query parameter from
+ * @returns The value of the query parameter with the given name
+ */
+export let query = (key, req: Request) => {
+  Map.get(key, req.message.query)
+}
+
+// TODO maybe change this to just mapping SingleVal/MultiVal
+/**
+ * Fetches a URL query parameter with the given name.
+ * 
+ * @param key: The name of the parameter to fetch the value of
+ * @param req: The request to fetch the query parameter from
+ * @returns The value of the query parameter with the given name
+ */
+export let joinedQuery = (key, delim, req: Request) => {
   Option.map(val => match (val) {
     SingleVal(val) => val,
     MultiVal(vals) => List.join(delim, vals)
-  }, Map.get(key, req.query))
+  }, Map.get(key, req.message.query))
 }
 
-// /**
-//  * Extracts an HTTP header from the given request with the given key, case-insensitive.
-//  * 
-//  * @param key: The header name to get
-//  * @param req: The incoming `Request`
-//  * 
-//  * @example Hopper.header("Content-Type", req) == Hopper.header("content-type", req) // true
-//  */
-// export let header = (key, req) => {
-//   let key = headerNormed(key)
-//   let httpVals = List.filter(((key, _)) => String.startsWith("HTTP_", key), Map.toList(req._wagiEnv))
-//   let headers = Map.fromList(List.map(((key, val)) => {
-//     let key = headerNormed(String.slice(5, String.length(key), key))
-//     (key, val)
-//   }, httpVals))
-//   Map.get(key, headers)
-// }
-
-export let path = req => {
-  Map.get("PATH_INFO", req._wagiEnv)
+let getPath = wagiEnv => {
+  match (Map.get("PATH_INFO", wagiEnv)) {
+    Some(val) => val,
+    None => failWithMsg("Did not find \"PATH_INFO\" in environment")
+  }
 }
 
-export let param = (key, req) => {
-  Option.expect("URL path param " ++ key ++ " expected to exist on request but did not", Map.get(key, req.params))
+/**
+ * Fetches the full path from the requested URL.
+ * 
+ * @param req: The request to examine
+ * @returns The full path requested
+ */
+export let path = (req: Request) => {
+  getPath(req.message.wagiEnv)
 }
 
-export let method = req => {
-  getReqMethod(req._wagiEnv)
+/**
+ * Fetches a path parameter from the request.
+ * 
+ * @param key: The path parameter to fetch
+ * @param req: The request to examine
+ * @returns The path parameter requested
+ */
+export let param = (key, req: Request) => {
+  Option.expect("URL path param " ++ key ++ " expected to exist on request but did not", Map.get(key, req.message.params))
 }
 
+/**
+ * Fetches the HTTP method of the request.
+ * 
+ * @param req: The request to examine
+ * @returns The HTTP method of the request.
+ */
+export let method = (req: Request) => {
+  getReqMethod(req.message.wagiEnv)
+}
+
+/**
+ * Fetches a header from the message.
+ * 
+ * @param key: The header to request
+ * @param msg: The request or response to examine
+ * @returns The header value requested
+ */
 export let header = (key, msg) => {
   let key = headerNormed(key)
   let header = List.find(
@@ -737,12 +868,58 @@ export let header = (key, msg) => {
   }
 }
 
+/**
+ * Fetches the message body as a string.
+ * 
+ * @param msg: The request or response to examine
+ * @returns The body as a string
+ */
+export let bodyString = msg => {
+  msg.body
+}
+
+/**
+ * Sets a variable on a message to a new arbitrary value.
+ * 
+ * @param key: The variable to set
+ * @param value: The new value to give the variable
+ * @param msg: The message to attach the variable to
+ */
 export let setVariable = (key, value, msg) => {
   Map.set(key, Marshal.marshal(value), msg.variables)
 }
 
-export let getVariable = (key, msg) => {
-  Marshal.unmarshal(Map.get(key, msg.variables))
+/**
+ * Represents possible `Err` reasons for why a variable's value was not read.
+ * 
+ * `NotSet` indicates that a variable with the given name does not exist
+ * 
+ * `DeserializationError` indicates that the variable was unable to be
+ * deserialized properly. The attached `String` gives the error reason
+ */
+export enum GetVariableError {
+  NotSet,
+  DeserializationError(String),
+}
+
+/**
+ * Fetches the value of a variable set on a message. The result of this
+ * function should be explicitly typed.
+ * 
+ * @param key: The variable to fetch
+ * @param msg: The message to inspect
+ * @returns The value of the variable requested
+ */
+export let variable = (key, msg) => {
+  match (Map.get(key, msg.variables)) {
+    Some(val) => {
+      match (Marshal.unmarshal(val)) {
+        Ok(val) => Ok(val),
+        Err(err) => Err(DeserializationError(err)),
+      }
+    },
+    None => Err(NotSet)
+  }
 }
 
 // export let withLogging: Middleware = next => req => {
@@ -756,44 +933,65 @@ export let getVariable = (key, msg) => {
 export let withCors = next => req => {
   let res = next(req)
   // handle CORS "preflight" request
-  if (res == notFound && req.method == Options) {
-    { status: NoContent, headers: Map.fromList([
-      ("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE"),
-      ("Access-Control-Allow-Origin", "*"),
-      ("Access-Control-Allow-Headers", "*")
-    ]), body: "" }
+  if (res == notFound && method(req) == Options) {
+    response(
+      NoContent,
+      Map.fromList([
+        ("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE"),
+        ("Access-Control-Allow-Origin", "*"),
+        ("Access-Control-Allow-Headers", "*")
+      ]),
+      ""
+    )
   } else {
     res
   }
 }
-// /**
-//  * Parses an HTTP request with `Content-Type: application/x-www-form-urlencoded`
-//  * and form data into a `Map` mapping form item names to their values. The
-//  * keys/values are expected to be in the URL query string on GET requests and in
-//  * the body on POST requests.
-//  * 
-//  * @param req: The incoming `Request`
-//  * @returns A `Map` mapping form item names to their values
-//  */
-// export let parseForm = req => {
-//   match (req.method) {
-//     Get => req.query,
-//     Post when header("Content-Type", req) == Some("application/x-www-form-urlencoded") => {
-//       let parts = String.split("&", req.body)
-//       Map.fromArray(Array.map(part => {
-//         match (String.indexOf("=", part)) {
-//           Some(i) => {
-//             let partName = String.slice(0, i, part)
-//             let partVal = String.slice(i + 1, String.length(part), part)
-//             (partName, partVal)
-//           },
-//           None => (part, "")
-//         }
-//       }, parts))
-//     },
-//     _ => Map.make(),
-//   }
-// }
+
+let parseUrlEncoded = parts => {
+  let valMap = Map.make()
+  List.forEach(part => {
+    let (name, val) = match (String.indexOf("=", part)) {
+      // some parts may only have a key, set value to empty string in this case
+      None => (part, ""),
+      Some(i) => {
+        let name = String.slice(0, i, part)
+        let val = String.slice(i + 1, String.length(part), part)
+        (name, val)
+      }
+    }
+    match (Map.get(name, valMap)) {
+      None => Map.set(name, SingleVal(val), valMap),
+      Some(SingleVal(currVal)) => Map.set(name, MultiVal([currVal, val]), valMap),
+      Some(MultiVal(currVals)) => Map.set(name, MultiVal(List.append(currVals, [val])), valMap)
+    }
+  }, parts)
+  valMap
+}
+
+// TODO handle semicolons in headers such as Content-Type: <type>; charset=utf-8
+/**
+ * Parses an HTTP request with form data into a `Map` mapping form item names
+ * to their values. The keys/values are expected to be in the URL query string
+ * on GET requests and in the body (along with a `Content-Type: x-www-form-urlencoded`
+ * header) on other requests.
+ * 
+ * @param req: The incoming `Request`
+ * @returns A `Map` mapping form item names to their values
+ */
+export let parseForm = req => {
+  match (method(req)) {
+    Get => Ok(req.message.query),
+    _ => {
+      if (header("Content-Type", req) == Some("application/x-www-form-urlencoded")) {
+        let parts = Array.toList(String.split("&", req.body))
+        Ok(parseUrlEncoded(parts))
+      } else {
+        Err(response(UnsupportedMediaType, Map.fromList([("Content-Type", "text/plain")]), "Expected Content-Type: application/x-www-form-urlencoded"))
+      }
+    }
+  }
+}
 
 // let parseContentDispositionHeader = headers => {
 //   let contentDispositionLine = List.find(
@@ -866,15 +1064,15 @@ export let withCors = next => req => {
 // }
 
 // TODO json deserialization
-let readBody = wagiEnv => {
+let getBody = wagiEnv => {
   let bodyLengthStr = match (Map.get("CONTENT_LENGTH", wagiEnv)) {
     Some(val) => val,
-    None => failWithMsg("Did not find \"CONTENT_LENGTH\" in request")
+    None => failWithMsg("Did not find \"CONTENT_LENGTH\" in environment")
   }
 
   let bodyLength = match (Number.parseInt(bodyLengthStr, 10)) {
     Ok(num) => num,
-    Err(err) => failWithMsgWithErr("Failed to parse \"CONTENT_LENGTH\" from request to an integer", err)
+    Err(err) => failWithMsgWithErr("Failed to parse \"CONTENT_LENGTH\" from environment to an integer", err)
   }
 
   match (File.fdRead(File.stdin, bodyLength)) {
@@ -883,34 +1081,18 @@ let readBody = wagiEnv => {
   }
 }
 
-let readArgs = () => {
+let getQueryMap = () => {
   match (Process.argv()) {
     Ok(args) => {
-      let [path, ...queryParamList] = Array.toList(args)
-      let queryParamMap = Map.make()
-      List.forEach(param => {
-        let (param, val) = match (String.indexOf("=", param)) {
-          // some query params may only have a key, set value to empty string in this case
-          None => (param, ""),
-          Some(i) => {
-            let varName = String.slice(0, i, param)
-            let varVal = String.slice(i + 1, String.length(param), param)
-            (varName, varVal)
-          }
-        }
-        match (Map.get(param, queryParamMap)) {
-          None => Map.set(param, SingleVal(val), queryParamMap),
-          Some(SingleVal(currVal)) => Map.set(param, MultiVal([currVal, val]), queryParamMap),
-          Some(MultiVal(currVals)) => Map.set(param, MultiVal(List.append(currVals, [val])), queryParamMap)
-        }
-      }, queryParamList)
-      (path, queryParamMap)
+      let [_, ...queryParamList] = Array.toList(args)
+      parseUrlEncoded(queryParamList)
     },
     Err(err) => failWithMsgWithErr("Unable to read system arguments", err)
   }
 }
     
 // TODO maybe normalize urls or something to make more robust; also currently trailing slash does not work if in URL
+// TODO remove //, /../, /./ when reading files
 let matchRestRegex = Result.unwrap(Regex.make("/\\*$"))
 // a bit of a hack to not capture regex groups specified in route.
 // if something is going wrong with matching patterns it may be due to this
@@ -948,20 +1130,20 @@ let preprocessRouteRegex = route => {
   }
 }
 
-let findReqHandler = (reqMethod, path, routeHandler) => {
+let findReqHandler = (reqMethod, path, route) => {
   let pathVars = Map.make()
   let notFoundHandler = req => notFound
 
-  let rec findReqHandlerHelper = (pathSegment, routeHandler) => {
+  let rec findReqHandlerHelper = (pathSegment, route) => {
     let paramNames = List.map(
       (matchRes: Regex.MatchResult) => Option.unwrap(matchRes.group(1)),
       List.append(
-        Regex.findAll(paramNameRegex, routeHandler.path),
-        Regex.findAll(customParamNameRegex, routeHandler.path)
+        Regex.findAll(paramNameRegex, route.path),
+        Regex.findAll(customParamNameRegex, route.path)
       )
     )
 
-    let routeRegex = preprocessRouteRegex(routeHandler.path)
+    let routeRegex = preprocessRouteRegex(route.path)
     let pathMatch = Regex.find(routeRegex, pathSegment)
     match (pathMatch) {
       None => notFoundHandler,
@@ -971,14 +1153,13 @@ let findReqHandler = (reqMethod, path, routeHandler) => {
           notFoundHandler
         } else {
           let matchedSegment = Option.unwrap(pathMatch.group(0))
-          log("matchSeg " ++ matchedSegment)
           if (pathMatch.numGroups > 1) {
             let [_, ...paramVals] = Array.toList(Array.map(grp => Option.unwrap(grp), pathMatch.allGroups()))
             List.forEach(((paramName, paramVal)) => {
               Map.set(paramName, paramVal, pathVars)
             }, List.zip(paramNames, paramVals))
           }
-          let reqHandler = match (routeHandler.route) {
+          let reqHandler = match (route.routeHandler) {
             Endpoint(handlerMethods, reqHandler) => {
               // if there is more left to the path e.g. if the route matcher is
               // /hi but the URL hit is /hi/hello, then consider it not matched
@@ -987,14 +1168,20 @@ let findReqHandler = (reqMethod, path, routeHandler) => {
               } else {
                 match (handlerMethods) {
                   All => reqHandler,
-                  Methods(methods) when List.contains(reqMethod, methods) => reqHandler,
-                  _ => notFoundHandler,
+                  Methods(methods) => {
+                    if (List.contains(reqMethod, methods)) {
+                      reqHandler
+                    } else {
+                      req => methodNotSupported(methods)
+                    }
+                  },
                 }
               }
             },
             Router(middleware, routeHandlers) => {
               let nextPathSegment = String.slice(thisPathEndI, String.length(pathSegment), pathSegment)
               let nextPathSegment = if (!String.startsWith("/", nextPathSegment)) "/" ++ nextPathSegment else nextPathSegment
+              // TODO may require changes here
               let reqHandler = List.reduce(
                 (found, routeHandler) => {
                   if (found == notFoundHandler) {
@@ -1006,12 +1193,7 @@ let findReqHandler = (reqMethod, path, routeHandler) => {
                 notFoundHandler,
                 routeHandlers
               )
-              let nfc = notFoundHandler
-              log("not this one " ++ toString(notFoundHandler == reqHandler))
-              log("this one " ++ toString(nfc == notFoundHandler))
-              let m = middleware(reqHandler)
-              log("did not blow up")
-              m
+              middleware(reqHandler)
             }
           }
           reqHandler
@@ -1020,31 +1202,40 @@ let findReqHandler = (reqMethod, path, routeHandler) => {
     }
   }
 
-  (findReqHandlerHelper(path, routeHandler), pathVars)
+  (findReqHandlerHelper(path, route), pathVars)
 }
 
 /**
- * Entry point for creating a server, taking a root route handler.
+ * Entry point for creating a server, taking a list of routes and a middleware
+ * to apply to all routes.
  * 
- * @param routeHandler: The root route handler for the server
+ * @param middleware: The middleware to use globally for the server
+ * @param routes: The root routes for the server
  */
-export let serve = routeHandler => {
-  let (path, query) = readArgs()
-  let wagiEnv = readEnv()
+export let serveWithMiddleware = (middleware, routes) => {
+  let wagiEnv = getWagiEnv()
 
-  // TODO handling of params with same names e.g. asdf=a&asdf=b
-  let (reqHandler, params) = findReqHandler(getReqMethod(wagiEnv), path, routeHandler)
-  log("reqHandler " ++ toString(reqHandler))
-  // let reqHandler = match (reqHandler) {
-  //   None => req => notFound,
-  //   Some(handler) => handler
-  // }
+  let rootRoute = { path: "/", routeHandler: Router(middleware, routes) }
+  let (reqHandler, params) = findReqHandler(getReqMethod(wagiEnv), getPath(wagiEnv), rootRoute)
   let request = {
+    message: {
+      wagiEnv,
+      params,
+      query: getQueryMap()
+    },
     variables: Map.make(),
-    _wagiEnv: wagiEnv,
-    query,
-    body: readBody(wagiEnv)
+    headers: getHeaders(wagiEnv),
+    body: getBody(wagiEnv)
   }
   let response = reqHandler(request)
   outputResponse(response)
+}
+
+/**
+ * Entry point for creating a server, taking a list of route handlers.
+ * 
+ * @param routes: The root routes for the server
+ */
+export let serve = routes => {
+  serveWithMiddleware(identity, routes)
 }
