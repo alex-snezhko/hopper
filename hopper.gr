@@ -40,39 +40,28 @@ export enum RequestMethod {
   Method(String)
 }
 
-// TODO test with various percent encodings and whatnot
-
-export enum OneOrMany {
-  SingleVal(String),
-  MultiVal(List<String>)
+/**
+ * Represents either a single value or multiple values.
+ */
+export enum OneOrMany<a> {
+  SingleVal(a),
+  MultiVal(List<a>)
 }
 
-// /**
-//  * Represents an incoming HTTP request.
-//  */
-// export record Request {
-//   mut variables: Map.Map<String, String>,
-//   _wagiEnv: Map.Map<String, String>,
-//   method: RequestMethod,
-//   params: Map.Map<String, String>,
-//   query: Map.Map<String, QueryParam>,
-//   fullUrl: String,
-//   body: String,
-// }
-
-record RequestData {
-  wagiEnv: Map.Map<String, String>,
-  params: Map.Map<String, String>,
-  query: Map.Map<String, OneOrMany>
+export record RequestMsgData {
+  _wagiEnv: Map.Map<String, String>,
+  _params: Map.Map<String, String>,
+  _query: Map.Map<String, OneOrMany<String>>
 }
 
 /**
  * Represents HTTP response statuses.
  */
 export enum Status {
+  // 1XX
   Continue,
   SwitchingProtocols,
-
+  // 2XX
   HttpOk,
   Created,
   Accepted,
@@ -80,7 +69,7 @@ export enum Status {
   NoContent,
   ResetContent,
   ParialContent,
-
+  // 3XX
   MultipleChoices,
   MovedPermanently,
   Found,
@@ -88,7 +77,7 @@ export enum Status {
   NotModified,
   TemporaryRedirect,
   PermanentRedirect,
-
+  // 4XX
   BadRequest,
   Unauthorized,
   PaymentRequired,
@@ -115,7 +104,7 @@ export enum Status {
   TooManyRequests,
   RequestHeaderFieldsTooLarge,
   UnavailableForLegalReasons,
-
+  // 5XX
   InternalServerError,
   NotImplemented,
   BadGateway,
@@ -125,32 +114,32 @@ export enum Status {
   VariantAlsoNegotiates,
   NotExtended,
   NetworkAuthenticationRequired,
-
-  HttpStatus(Number)
+  // arbitrary status
+  Status(Number)
 }
 
-// /**
-//  * Represents an HTTP response.
-//  */
-// export record Response {
-//   status: Status,
-//   headers: Map.Map<String, String>,
-//   body: String,
-// }
+// underscore prefix to discourage direct record field access
 
-record ResponseData {
-  status: Status
+export record ResponseMsgData {
+  _status: Status
 }
 
-record Message<a> {
-  message: a,
-  headers: Map.Map<String, String>,
-  body: String,
-  variables: Map.Map<String, Bytes>,
+export record Message<a> {
+  _message: a,
+  _headers: Map.Map<String, String>,
+  _body: String,
+  _variables: Map.Map<String, Bytes>,
 }
 
-export type Request = Message<RequestData>
-export type Response = Message<ResponseData>
+/**
+ * Represents an HTTP request.
+ */
+export type Request = Message<RequestMsgData>
+
+/**
+ * Represents an HTTP response.
+ */
+export type Response = Message<ResponseMsgData>
 
 /**
  * Represents an HTTP request handler which processes a request and returns a response.
@@ -177,6 +166,46 @@ enum RouteHandler {
 }
 
 /**
+ * Represents data for a file for `multipart/form-data` requests.
+ */
+export record FilePartData {
+  filename: String,
+  contentType: String,
+  content: String
+}
+
+/**
+ * Represents data for `multipart/form-data` requests.
+ */
+export enum Part {
+  FilePart(FilePartData),
+  TextPart(String)
+}
+
+/**
+ * Represents possible errors encountered while parsing form bodies.
+ */
+export enum FormError {
+  ContentTypeNotAllowed,
+  InvalidFormData(String),
+}
+
+/**
+ * Represents possible `Err` reasons for why a variable's value was not read.
+ * 
+ * `NotSet` indicates that a variable with the given name does not exist
+ * 
+ * `DeserializationError` indicates that the variable was unable to be
+ * deserialized properly. The attached `String` gives the error reason
+ */
+export enum GetVariableError {
+  NotSet,
+  DeserializationError(String),
+}
+
+export type Variable<a> = Result<a, GetVariableError>
+
+/**
  * @section Values: Functions included in the Hopper module.
  */
 
@@ -189,6 +218,20 @@ export let log = val => {
   ignore(File.fdWrite(File.stderr, toString(val) ++ "\n"))
 }
 
+let methodPairs = [
+  (Get, "GET"),
+  (Post, "POST"),
+  (Put, "PUT"),
+  (Delete, "DELETE"),
+  (Head, "HEAD"),
+  (Patch, "PATCH"),
+  (Options, "OPTIONS"),
+  (Trace, "TRACE"),
+]
+
+let methodToStringMap = Map.fromList(methodPairs)
+let stringToMethodMap = Map.fromList(List.map(((a, b)) => (b, a), methodPairs))
+
 /**
  * Converts a string to an HTTP `RequestMethod`.
  * 
@@ -198,16 +241,9 @@ export let log = val => {
  * @example Hopper.stringToMethod("GET") // RequestMethod.Get
  */
 export let stringToMethod = str => {
-  match (str) {
-    "GET" => Get,
-    "POST" => Post,
-    "PUT" => Put,
-    "DELETE" => Delete,
-    "HEAD" => Head,
-    "PATCH" => Patch,
-    "OPTIONS" => Options,
-    "TRACE" => Trace,
-    _ => Method(str)
+  match (Map.get(str, stringToMethodMap)) {
+    Some(method) => method,
+    None => Method(str)
   }
 }
 
@@ -219,97 +255,143 @@ export let stringToMethod = str => {
  */
 export let methodToString = method => {
   match (method) {
-    Get => "GET",
-    Post => "POST",
-    Put => "PUT",
-    Delete => "DELETE",
-    Head => "HEAD",
-    Patch => "PATCH",
-    Options => "OPTIONS",
-    Trace => "TRACE",
     Method(str) => str,
+    _ => Option.unwrap(Map.get(method, methodToStringMap))
+  }
+}
+
+let statusPairs = [
+  (Continue, 100),
+  (SwitchingProtocols, 101),
+
+  (HttpOk, 200),
+  (Created, 201),
+  (Accepted, 202),
+  (NonAuthoritativeInformation, 203),
+  (NoContent, 204),
+  (ResetContent, 205),
+  (ParialContent, 206),
+
+  (MultipleChoices, 300),
+  (MovedPermanently, 301),
+  (Found, 302),
+  (SeeOther, 303),
+  (NotModified, 304),
+  (TemporaryRedirect, 307),
+  (PermanentRedirect, 308),
+
+  (BadRequest, 400),
+  (Unauthorized, 401),
+  (PaymentRequired, 402),
+  (Forbidden, 403),
+  (NotFound, 404),
+  (MethodNotAllowed, 405),
+  (NotAcceptable, 406),
+  (ProxyAuthenticationRequired, 407),
+  (RequestTimeout, 408),
+  (Conflict, 409),
+  (Gone, 410),
+  (LengthRequired, 411),
+  (PreconditionFailed, 412),
+  (PayloadTooLarge, 413),
+  (UriTooLong, 414),
+  (UnsupportedMediaType, 415),
+  (RangeNotSatisfiable, 416),
+  (ExpectationFailed, 417),
+  (ImATeapot, 418),
+  (MisdirectedRequest, 421),
+  (TooEarly, 425),
+  (UpgradeRequired, 426),
+  (PrecoditionRequired, 428),
+  (TooManyRequests, 429),
+  (RequestHeaderFieldsTooLarge, 431),
+  (UnavailableForLegalReasons, 451),
+
+  (InternalServerError, 500),
+  (NotImplemented, 501),
+  (BadGateway, 502),
+  (ServiceUnavailable, 503),
+  (GatewayTimeout, 504),
+  (HttpVersionNotSupported, 505),
+  (VariantAlsoNegotiates, 506),
+  (NotExtended, 510),
+  (NetworkAuthenticationRequired, 511),
+]
+
+let statusToCodeMap = Map.fromList(statusPairs)
+let codeToStatusMap = Map.fromList(List.map(((a, b)) => (b, a), statusPairs))
+
+/**
+ * Converts a status code to its corresponding status.
+ * 
+ * @param status: A status code to convert to a `Status`
+ * @returns A status representing the given code
+ */
+export let codeToStatus = code => {
+  match (Map.get(code, codeToStatusMap)) {
+    Some(status) => status,
+    _ => Status(code)
   }
 }
 
 /**
  * Converts a response status to its corresponding status code.
  * 
- * @param status: An `HttpStatus` to get the status code of
+ * @param status: A `Status` to get the status code of
  * @returns A status code for the response status
  */
-export let statusCode = status => {
+export let statusToCode = status => {
   match (status) {
-    Continue => 100,
-    SwitchingProtocols => 101,
-
-    HttpOk => 200,
-    Created => 201,
-    Accepted => 202,
-    NonAuthoritativeInformation => 203,
-    NoContent => 204,
-    ResetContent => 205,
-    ParialContent => 206,
-
-    MultipleChoices => 300,
-    MovedPermanently => 301,
-    Found => 302,
-    SeeOther => 303,
-    NotModified => 304,
-    TemporaryRedirect => 307,
-    PermanentRedirect => 308,
-
-    BadRequest => 400,
-    Unauthorized => 401,
-    PaymentRequired => 402,
-    Forbidden => 403,
-    NotFound => 404,
-    MethodNotAllowed => 405,
-    NotAcceptable => 406,
-    ProxyAuthenticationRequired => 407,
-    RequestTimeout => 408,
-    Conflict => 409,
-    Gone => 410,
-    LengthRequired => 411,
-    PreconditionFailed => 412,
-    PayloadTooLarge => 413,
-    UriTooLong => 414,
-    UnsupportedMediaType => 415,
-    RangeNotSatisfiable => 416,
-    ExpectationFailed => 417,
-    ImATeapot => 418,
-    MisdirectedRequest => 421,
-    TooEarly => 425,
-    UpgradeRequired => 426,
-    PrecoditionRequired => 428,
-    TooManyRequests => 429,
-    RequestHeaderFieldsTooLarge => 431,
-    UnavailableForLegalReasons => 451,
-
-    InternalServerError => 500,
-    NotImplemented => 501,
-    BadGateway => 502,
-    ServiceUnavailable => 503,
-    GatewayTimeout => 504,
-    HttpVersionNotSupported => 505,
-    VariantAlsoNegotiates => 506,
-    NotExtended => 510,
-    NetworkAuthenticationRequired => 511,
-    
-    HttpStatus(status) => status
+    Status(status) => status,
+    _ => Option.unwrap(Map.get(status, statusToCodeMap))
   }
 }
 
 let isStatusType = beginRange => status => {
-  let code = statusCode(status)
+  let code = statusToCode(status)
   let endRange = beginRange + 100
   code >= beginRange && code < endRange
 }
 
-export let isInformational = isStatusType(100)
-export let isSuccessful = isStatusType(200)
-export let isRedirection = isStatusType(300)
-export let isClientError = isStatusType(400)
-export let isServerError = isStatusType(500)
+/**
+ * Determines if an HTTP status is informational i.e. has a 1XX code.
+ * 
+ * @param status: The status to examine
+ * @returns `true` if the status has a 1XX status code or `false` otherwise
+ */
+export let isInformationalStatus = isStatusType(100)
+
+/**
+ * Determines if an HTTP status is successful i.e. has a 2XX code.
+ * 
+ * @param status: The status to examine
+ * @returns `true` if the status has a 2XX status code or `false` otherwise
+ */
+export let isSuccessfulStatus = isStatusType(200)
+
+/**
+ * Determines if an HTTP status is a redirection i.e. has a 3XX code.
+ * 
+ * @param status: The status to examine
+ * @returns `true` if the status has a 3XX status code or `false` otherwise
+ */
+export let isRedirectionStatus = isStatusType(300)
+
+/**
+ * Determines if an HTTP status is a client error i.e. has a 4XX code.
+ * 
+ * @param status: The status to examine
+ * @returns `true` if the status has a 4XX status code or `false` otherwise
+ */
+export let isClientErrorStatus = isStatusType(400)
+
+/**
+ * Determines if an HTTP status is a server error i.e. has a 5XX code.
+ * 
+ * @param status: The status to examine
+ * @returns `true` if the status has a 5XX status code or `false` otherwise
+ */
+export let isServerErrorStatus = isStatusType(500)
 
 // credit to https://github.com/deislabs/wagi-fileserver for the media types
 let mediaTypes = Map.fromList([
@@ -435,10 +517,8 @@ export let guessMimeType = fileName => {
 export let middlewares: List<Middleware> -> Middleware = mws => handler => {
   List.reduceRight((mw, handler) => mw(handler), handler, mws)
 }
-// TODO add middlewares: authentication, logging, etc
-// TODO look into CGI section 3.1, 4.1.1 to determine how auth could be done
 
-// TODO add cookies
+// TODO add cookies once cryptography added to stdlib
 // TODO implement all suggestions in https://datatracker.ietf.org/doc/html/rfc3875
 
 /**
@@ -450,19 +530,7 @@ export let middlewares: List<Middleware> -> Middleware = mws => handler => {
  * @returns A new `Response` with the given values
  */
 export let response = (status, headers, body) => {
-  { message: { status, }, variables: Map.make(), headers, body }: Response
-}
-
-/**
- * Creates a new `Response` from an existing response, but with the response status code changed.
- * 
- * @param status: The desired HTTP status
- * @param res: The base response
- * @returns A new `Response` with the desired HTTP status
- */
-export let status = (status: Status, res: Response) => {
-  let { headers, body, _ } = res
-  response(status, headers, body)
+  { _message: { _status: status, }, _variables: Map.make(), _headers: headers, _body: body }: Response
 }
 
 /**
@@ -494,6 +562,18 @@ export let json = body => response(HttpOk, Map.fromList([("Content-Type", "appli
  */
 export let contentType = (contentType, body) => response(HttpOk, Map.fromList([("Content-Type", contentType)]), body)
 
+/**
+ * Creates a new `Response` from an existing response, but with the response status code changed.
+ * 
+ * @param status: The desired HTTP status
+ * @param res: The base response
+ * @returns A new `Response` with the desired HTTP status
+ */
+export let newStatus = (status: Status, res: Response) => {
+  let { _headers, _body, _ } = res
+  response(status, _headers, _body)
+}
+
 let notFound = response(NotFound, Map.fromList([("Content-Type", "text/plain")]), "Route not found")
 let methodNotSupported = supportedMethods => {
   let allowed = List.join(", ", List.map(methodToString, supportedMethods))
@@ -504,6 +584,7 @@ let methodNotSupported = supportedMethods => {
   )
 }
 
+// TODO serving from different directories as configured in WAGI
 /**
  * Creates a new `Response` from a static file on the server at the given path.
  * 
@@ -514,7 +595,7 @@ export let file = filePath => {
   let result = File.pathOpen(File.pwdfd, [], filePath, [], [File.FdFilestats, File.FdRead], [], [])
 
   match (result) {
-    Err(_) => response(NotFound, Map.fromList([("Content-Type", "text/plain")]), "404 File Not Found"),
+    Err(_) => response(NotFound, Map.fromList([("Content-Type", "text/plain")]), "File Not Found"),
     Ok(fd) => {
       let stats = Result.unwrap(File.fdFilestats(fd))
       let (contents, _) = Result.unwrap(File.fdRead(fd, Int64.toNumber(stats.size)))
@@ -533,7 +614,7 @@ export let file = filePath => {
  * @returns A new redirection `Response` with status code "302 Found"
  */
 export let redirectLocal = (path, req: Request) => {
-  let item = key => Option.unwrap(Map.get(key, req.message.wagiEnv))
+  let item = key => Option.unwrap(Map.get(key, req._message._wagiEnv))
   let protocol = if (String.startsWith("https://", item("X_FULL_URL"))) "https://" else "http://"
   let baseUrl = protocol ++ item("SERVER_NAME") ++ ":" ++ item("SERVER_PORT")
   response(Found, Map.fromList([("Location", baseUrl ++ path)]), "")
@@ -687,7 +768,6 @@ export let scopeWithMiddleware = (path, middleware, routes) => {
   { path, routeHandler: Router(middleware, routes) }
 }
 
-// TODO integrate testing
 /**
  * Creates a new `Route` composed of multiple sub-routes defined relative to the path given.
  * 
@@ -704,14 +784,14 @@ let failWithMsg = msg => fail "ERROR " ++ msg ++ "; " ++ genericErrMsg
 let failWithMsgWithErr = (msg, err) => fail "ERROR " ++ msg ++ "; " ++ genericErrMsg ++ "; err " ++ toString(err)
 
 let outputResponse = (res: Response) => {
-  let { headers, body, message: { status }, _ } = res
+  let { _headers, _body, _message: { _status }, _ } = res
   // script must specify Content-Type per CGI v1.1 spec, so default to
   // application/octet-stream if one was not given
   Map.update("Content-Type", val => match (val) {
     None => Some("application/octet-stream"),
     _ => val
-  }, headers)
-  Map.set("Status", toString(statusCode(status)), headers)
+  }, _headers)
+  Map.set("Status", toString(statusToCode(_status)), _headers)
 
   let safeHeaders = Map.fromList(List.map(((key, val)) => {
     // remove any newline characters from headers because that will cause
@@ -723,7 +803,7 @@ let outputResponse = (res: Response) => {
       String.explode(str)
     )
     (makeSafe(key), makeSafe(val))
-  }, Map.toList(headers)))
+  }, Map.toList(_headers)))
 
   // redirects should not specify additional headers per CGI spec
   match (Map.get("Location", safeHeaders)) {
@@ -732,7 +812,7 @@ let outputResponse = (res: Response) => {
       Map.forEach((key, val) => print(key ++ ": " ++ val), safeHeaders)
       // empty line separates headers from body per CGI spec
       print("")
-      print(body)
+      print(_body)
     }
   }
 }
@@ -780,7 +860,7 @@ let toLower = str => {
 
 let headerNormed = str => {
   String.implode(Array.map(
-    c => if (c == '-') '_' else c,
+    c => if (c == '_') '-' else c,
     String.explode(toLower(str))
   ))
 }
@@ -793,22 +873,17 @@ let headerNormed = str => {
  * @returns The value of the query parameter with the given name
  */
 export let query = (key, req: Request) => {
-  Map.get(key, req.message.query)
+  Map.get(key, req._message._query)
 }
 
-// TODO maybe change this to just mapping SingleVal/MultiVal
 /**
- * Fetches a URL query parameter with the given name.
+ * Fetches all URL query parameters.
  * 
- * @param key: The name of the parameter to fetch the value of
- * @param req: The request to fetch the query parameter from
- * @returns The value of the query parameter with the given name
+ * @param req: The request to fetch the query parameters from
+ * @returns All query parameters given
  */
-export let joinedQuery = (key, delim, req: Request) => {
-  Option.map(val => match (val) {
-    SingleVal(val) => val,
-    MultiVal(vals) => List.join(delim, vals)
-  }, Map.get(key, req.message.query))
+export let queries = (req: Request) => {
+  req._message._query
 }
 
 let getPath = wagiEnv => {
@@ -825,7 +900,7 @@ let getPath = wagiEnv => {
  * @returns The full path requested
  */
 export let path = (req: Request) => {
-  getPath(req.message.wagiEnv)
+  getPath(req._message._wagiEnv)
 }
 
 /**
@@ -836,7 +911,7 @@ export let path = (req: Request) => {
  * @returns The path parameter requested
  */
 export let param = (key, req: Request) => {
-  Option.expect("URL path param " ++ key ++ " expected to exist on request but did not", Map.get(key, req.message.params))
+  Option.expect("URL path param " ++ key ++ " expected to exist on request but did not", Map.get(key, req._message._params))
 }
 
 /**
@@ -846,7 +921,11 @@ export let param = (key, req: Request) => {
  * @returns The HTTP method of the request.
  */
 export let method = (req: Request) => {
-  getReqMethod(req.message.wagiEnv)
+  getReqMethod(req._message._wagiEnv)
+}
+
+export let status = (res: Response) => {
+  res._message._status
 }
 
 /**
@@ -860,7 +939,7 @@ export let header = (key, msg) => {
   let key = headerNormed(key)
   let header = List.find(
     ((headerKey, val)) => headerNormed(headerKey) == key,
-    Map.toList(msg.headers)
+    Map.toList(msg._headers)
   )
   match (header) {
     Some((_, val)) => Some(val),
@@ -869,13 +948,23 @@ export let header = (key, msg) => {
 }
 
 /**
+ * Fetches headers on a message.
+ * 
+ * @param msg: The request or response to examine
+ * @returns The headers on the request or response, with header names all in lowercase
+ */
+export let headers = msg => {
+  Map.fromList(List.map(((key, val)) => (headerNormed(key), val), Map.toList(msg._headers)))
+}
+
+/**
  * Fetches the message body as a string.
  * 
  * @param msg: The request or response to examine
  * @returns The body as a string
  */
-export let bodyString = msg => {
-  msg.body
+export let body = msg => {
+  msg._body
 }
 
 /**
@@ -886,20 +975,7 @@ export let bodyString = msg => {
  * @param msg: The message to attach the variable to
  */
 export let setVariable = (key, value, msg) => {
-  Map.set(key, Marshal.marshal(value), msg.variables)
-}
-
-/**
- * Represents possible `Err` reasons for why a variable's value was not read.
- * 
- * `NotSet` indicates that a variable with the given name does not exist
- * 
- * `DeserializationError` indicates that the variable was unable to be
- * deserialized properly. The attached `String` gives the error reason
- */
-export enum GetVariableError {
-  NotSet,
-  DeserializationError(String),
+  Map.set(key, Marshal.marshal(value), msg._variables)
 }
 
 /**
@@ -911,7 +987,7 @@ export enum GetVariableError {
  * @returns The value of the variable requested
  */
 export let variable = (key, msg) => {
-  match (Map.get(key, msg.variables)) {
+  match (Map.get(key, msg._variables)) {
     Some(val) => {
       match (Marshal.unmarshal(val)) {
         Ok(val) => Ok(val),
@@ -919,39 +995,12 @@ export let variable = (key, msg) => {
       }
     },
     None => Err(NotSet)
-  }
-}
-
-// export let withLogging: Middleware = next => req => {
-//   let begin = Time.monotonicTime()
-//   next(req)
-//   let end = Time.monotonicTime()
-//   log(methodToString(req.method) ++ " " ++ req.fullUrl ++ " ")
-// }
-
-// TODO finish
-export let withCors = next => req => {
-  let res = next(req)
-  // handle CORS "preflight" request
-  if (res == notFound && method(req) == Options) {
-    response(
-      NoContent,
-      Map.fromList([
-        ("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE"),
-        ("Access-Control-Allow-Origin", "*"),
-        ("Access-Control-Allow-Headers", "*")
-      ]),
-      ""
-    )
-  } else {
-    res
-  }
+  }: Variable<a>
 }
 
 let parseUrlEncoded = parts => {
-  let valMap = Map.make()
-  List.forEach(part => {
-    let (name, val) = match (String.indexOf("=", part)) {
+  List.map(part => {
+    match (String.indexOf("=", part)) {
       // some parts may only have a key, set value to empty string in this case
       None => (part, ""),
       Some(i) => {
@@ -960,110 +1009,151 @@ let parseUrlEncoded = parts => {
         (name, val)
       }
     }
-    match (Map.get(name, valMap)) {
-      None => Map.set(name, SingleVal(val), valMap),
-      Some(SingleVal(currVal)) => Map.set(name, MultiVal([currVal, val]), valMap),
-      Some(MultiVal(currVals)) => Map.set(name, MultiVal(List.append(currVals, [val])), valMap)
-    }
   }, parts)
+}
+
+let combineToMapSharedKeys = list => {
+  let valMap = Map.make()
+  List.forEach(((key, val)) => {
+    match (Map.get(key, valMap)) {
+      None => Map.set(key, SingleVal(val), valMap),
+      Some(SingleVal(currVal)) => Map.set(key, MultiVal([currVal, val]), valMap),
+      Some(MultiVal(currVals)) => Map.set(key, MultiVal(List.append(currVals, [val])), valMap)
+    }
+  }, list)
   valMap
 }
 
-// TODO handle semicolons in headers such as Content-Type: <type>; charset=utf-8
 /**
- * Parses an HTTP request with form data into a `Map` mapping form item names
- * to their values. The keys/values are expected to be in the URL query string
- * on GET requests and in the body (along with a `Content-Type: x-www-form-urlencoded`
- * header) on other requests.
+ * Parses an HTTP request body with URL-encoded form data into a `Map` mapping
+ * form item names to their values. The keys/values are expected to be
+ * URL-encoded with `Content-Type: x-www-form-urlencoded`
  * 
  * @param req: The incoming `Request`
  * @returns A `Map` mapping form item names to their values
  */
-export let parseForm = req => {
-  match (method(req)) {
-    Get => Ok(req.message.query),
-    _ => {
-      if (header("Content-Type", req) == Some("application/x-www-form-urlencoded")) {
-        let parts = Array.toList(String.split("&", req.body))
-        Ok(parseUrlEncoded(parts))
-      } else {
-        Err(response(UnsupportedMediaType, Map.fromList([("Content-Type", "text/plain")]), "Expected Content-Type: application/x-www-form-urlencoded"))
+export let urlencodedFormBody = req => {
+  match (header("Content-Type", req)) {
+    Some(t) when String.startsWith("application/x-www-form-urlencoded", t) => {
+      let parts = Array.toList(String.split("&", req._body))
+      let urlEncodedItems = parseUrlEncoded(parts)
+      Ok(combineToMapSharedKeys(urlEncodedItems))
+    },
+    _ => Err(ContentTypeNotAllowed)
+  }
+}
+
+let partContentDisposition = headers => {
+  let regex = Result.unwrap(Regex.make("^content-disposition:\\s*form-data;"))
+  let contentDispositionLine = List.find(
+    line => Regex.isMatch(regex, toLower(line)),
+    headers
+  )
+  match (contentDispositionLine) {
+    None => Err(InvalidFormData("Part missing Content-Disposition: form-data header")),
+    Some(contentDispositionLine) => {
+      // TODO can make more robust
+      let nameRegex = Result.unwrap(Regex.make("name=\"([^\"]+)\""))
+      let filenameRegex = Result.unwrap(Regex.make("filename=\"([^\"]+)\""))
+      match (Regex.find(nameRegex, contentDispositionLine)) {
+        None => Err(InvalidFormData("Part missing name in Content-Disposition header")),
+        Some(reMatch) => {
+          let name = Option.unwrap(reMatch.group(1))
+          let filename = Option.map(
+            (reMatch: Regex.MatchResult) => Option.unwrap(reMatch.group(1)),
+            Regex.find(filenameRegex, contentDispositionLine)
+          )
+          Ok((name, filename))
+        }
       }
     }
   }
 }
 
-// let parseContentDispositionHeader = headers => {
-//   let contentDispositionLine = List.find(
-//     line => String.startsWith("content-disposition", toLower(line)),
-//     headers
-//   )
-//   match (contentDispositionLine) {
-//     None => None,
-//     Some(contentDispositionLine) => {
-//       let regex = Result.unwrap(Regex.make("content-disposition:\\s*form-data;\\s*name=\"(.+)\""))
-//       match (Regex.find(regex, toLower(contentDispositionLine))) {
-//         None => None,
-//         Some(reMatch) => {
-//           let (nameBeginI, nameEndI) = reMatch.groupPosition(1)
-//           let name = String.slice(nameBeginI, nameEndI, contentDispositionLine)
-//           Some(name)
-//         }
-//       }
+let partContentType = (headers, filename) => {
+  let contentTypeLine = List.find(
+    line => String.startsWith("content-type:", toLower(line)),
+    headers
+  )
+  match (contentTypeLine) {
+    Some(line) => String.trim(String.slice(String.length("content-type:"), String.length(line), line)),
+    None => guessMimeType(filename)
+  }
+}
 
-//     }
-//   }
-// }
+let readMultipart = (body, boundary) => {
+  let lines = Array.toList(String.split("\n", body))
+  // first line will be boundary
+  let [_, ...lines] = lines
+  let lines = List.takeWhile(line => line != "--" ++ boundary ++ "--", lines)
+  let parts = List.reduceRight(
+    (line, parts) => {
+      if (line == "--" ++ boundary) {
+        [[], ...parts]
+      } else {
+        let [partLines, ...rest] = parts
+        [[line, ...partLines], ...rest]
+      }
+    },
+    [[]],
+    lines
+  )
+  let multipartNameVals = List.reduceRight(
+    (partLines, multipartNameVals) => {
+      match (multipartNameVals) {
+        Err(err) => Err(err),
+        Ok(multipartNameVals) => {
+          let lineEmpty = line => String.trim(line) == ""
+          let headers = List.takeWhile(line => !lineEmpty(line), partLines)
 
-// let readMultipart = (body, boundary) => {
-//   let lines = Array.toList(String.split("\n", body))
-//   let lines = List.takeWhile(line => line != "--" ++ boundary ++ "--", lines)
-//   let parts = List.reduceRight(
-//     (line, parts) => {
-//       if (line == "--" ++ boundary) {
-//         let [partLines, ...rest] = parts
-//         [[line, ...partLines], rest]
-//       } else {
-//         [[], parts]
-//       }
-//     },
-//     [[]],
-//     lines
-//   )
-//   List.reduce(
-//     partLines => {
-//       let lineEmpty = line => String.strip(line) == ""
+          match (partContentDisposition(headers)) {
+            Err(err) => Err(err),
+            Ok((name, filename)) => {
+              let body = List.dropWhile(lineEmpty, List.dropWhile(line => !lineEmpty(line), partLines))
+              let bodyStr = List.join("\n", body)
+              let val = match (filename) {
+                Some(filename) => {
+                  let contentType = partContentType(headers, filename)
+                  FilePart({ filename, contentType, content: bodyStr })
+                },
+                None => TextPart(bodyStr)
+              }
+              Ok([(name, val), ...multipartNameVals])
+            }
+          }
+        }
+      }
+    },
+    Ok([]),
+    parts
+  )
+  Result.map(combineToMapSharedKeys, multipartNameVals)
+}
 
-//       let headers = List.takeWhile(line => !lineEmpty(line), partLines)
-//       let body = List.dropWhile(lineEmpty, List.dropWhile(line => !lineEmpty(line), partLines))
+/**
+ * Parses an HTTP request body with multipart form data into a `Map` mapping
+ * form item names to their values. The request should have
+ * `Content-Type: multipart/form-data`
+ * 
+ * @param req: The incoming `Request`
+ * @returns A `Map` mapping form item names to their values
+ */
+export let multipartFormBody = req => {
+  match (header("Content-Type", req)) {
+    Some(val) when String.startsWith("multipart/form-data;", val) => {
+      let boundary = String.trim(String.slice(String.length("multipart/form-data;"), String.length(val), val))
+      if (String.startsWith("boundary=", boundary)) {
+        let boundaryVal = String.slice(String.length("boundary="), String.length(boundary), boundary)
+        readMultipart(req._body, boundaryVal)
+      } else {
+        Err(InvalidFormData("Form data missing boundary"))
+      }
+    },
+    _ => Err(ContentTypeNotAllowed)
+  }
+}
 
-//       let itemName = parseContentDispositionHeader(headers)
-//       let bodyStr = String.join("\n", body)
-//     },
-//     parts
-//   )
-// }
-
-// export let parseMultipartForm = req => {
-//   match (req.method) {
-//     Post => match (header("Content-Type", req)) {
-//       Some(val) when String.startsWith("multipart/form-data;", val) => {
-//         let boundary = String.trim(String.slice(String.length("multipart/form-data;"), String.length(val), val))
-//         if (String.startsWith("boundary=", boundary)) {
-//           // TODO consider quotes
-//           let boundaryVal = String.slice(String.length("boundary="), String.length(boundary), val)
-//           readMultipart(req.body, boundaryVal)
-//         } else {
-//           Map.make()
-//         }
-//       },
-//       _ => Map.make()
-//     },
-//     _ => Map.make(),
-//   }
-// }
-
-// TODO json deserialization
+// TODO maybe return HTTP responses instead of failing
 let getBody = wagiEnv => {
   let bodyLengthStr = match (Map.get("CONTENT_LENGTH", wagiEnv)) {
     Some(val) => val,
@@ -1085,14 +1175,16 @@ let getQueryMap = () => {
   match (Process.argv()) {
     Ok(args) => {
       let [_, ...queryParamList] = Array.toList(args)
-      parseUrlEncoded(queryParamList)
+      let urlEncodedItems = parseUrlEncoded(queryParamList)
+      combineToMapSharedKeys(urlEncodedItems)
     },
     Err(err) => failWithMsgWithErr("Unable to read system arguments", err)
   }
 }
     
 // TODO maybe normalize urls or something to make more robust; also currently trailing slash does not work if in URL
-// TODO remove //, /../, /./ when reading files
+// TODO maybe allow stars anywhere
+// TODO thoroughly test path matching
 let matchRestRegex = Result.unwrap(Regex.make("/\\*$"))
 // a bit of a hack to not capture regex groups specified in route.
 // if something is going wrong with matching patterns it may be due to this
@@ -1108,7 +1200,6 @@ let noDollarSignAtEnd = Result.unwrap(Regex.make("(?<!\\$)$"))
 let preprocessRouteRegex = route => {
   let routeRegex = List.reduce(
     (str, (regex, replaceWith)) => {
-      // log("rr " ++ str)
       Regex.replaceAll(regex, str, replaceWith)
     },
     route,
@@ -1134,6 +1225,8 @@ let findReqHandler = (reqMethod, path, route) => {
   let pathVars = Map.make()
   let notFoundHandler = req => notFound
 
+  // performs breadth-first-search to find suitable request
+  // handler for the given path and method
   let rec findReqHandlerHelper = (pathSegment, route) => {
     let paramNames = List.map(
       (matchRes: Regex.MatchResult) => Option.unwrap(matchRes.group(1)),
@@ -1144,8 +1237,7 @@ let findReqHandler = (reqMethod, path, route) => {
     )
 
     let routeRegex = preprocessRouteRegex(route.path)
-    let pathMatch = Regex.find(routeRegex, pathSegment)
-    match (pathMatch) {
+    match (Regex.find(routeRegex, pathSegment)) {
       None => notFoundHandler,
       Some(pathMatch) => {
         let (thisPathStartI, thisPathEndI) = Option.unwrap(pathMatch.groupPosition(0))
@@ -1153,6 +1245,7 @@ let findReqHandler = (reqMethod, path, route) => {
           notFoundHandler
         } else {
           let matchedSegment = Option.unwrap(pathMatch.group(0))
+          // capture groups being matched means we have found path parameter values
           if (pathMatch.numGroups > 1) {
             let [_, ...paramVals] = Array.toList(Array.map(grp => Option.unwrap(grp), pathMatch.allGroups()))
             List.forEach(((paramName, paramVal)) => {
@@ -1218,14 +1311,14 @@ export let serveWithMiddleware = (middleware, routes) => {
   let rootRoute = { path: "/", routeHandler: Router(middleware, routes) }
   let (reqHandler, params) = findReqHandler(getReqMethod(wagiEnv), getPath(wagiEnv), rootRoute)
   let request = {
-    message: {
-      wagiEnv,
-      params,
-      query: getQueryMap()
+    _message: {
+      _wagiEnv: wagiEnv,
+      _params: params,
+      _query: getQueryMap()
     },
-    variables: Map.make(),
-    headers: getHeaders(wagiEnv),
-    body: getBody(wagiEnv)
+    _variables: Map.make(),
+    _headers: getHeaders(wagiEnv),
+    _body: getBody(wagiEnv)
   }
   let response = reqHandler(request)
   outputResponse(response)

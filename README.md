@@ -9,7 +9,7 @@ Key features:
 - Out-of-the-box support for common use cases, including HTML form handling
 - Composable middleware system to enable code reuse and extensibility
 
-**NOTE: Express caution if using Hopper in any serious application. Hopper is currently in a "Proof-of-Concept" stage and has not been thoroughly vetted for robustness and/or security vulnerabilities. It is also built on top of WAGI, a technology considered to be experimental by its authors.**
+**NOTE: Express caution if using Hopper in any serious application. Hopper is built on experimental technology and is currently in a "Proof-of-Concept" stage, having not been thoroughly vetted for robustness and/or security vulnerabilities. Furthermore, its API may significantly change in the future.**
 
 
 ## Documentation

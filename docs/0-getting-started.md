@@ -20,11 +20,11 @@ Now that we have what we need, let's write a simple HTTP server that has a singl
 ```
 import Hopper from "./hopper"
 
-Hopper.serve(
+Hopper.serve([
   Hopper.get("/hello", req => {
     Hopper.text("Hello, world!")
   })
-)
+])
 ```
 Note that we'll go over each of these features in more depth in following guides.
 
@@ -44,3 +44,8 @@ Now if we try to access `http://localhost:3000/hello` with a GET request, we sho
 $ curl http://localhost:3000/hello
 Hello, world!
 ```
+
+## ⚠️ A note about logging
+Often times it is desired to write log messages for debugging or logging significant application events. **️ Please note that you should NOT write to `stdout` for logging e.g. through Grain's built-in `print` function. WAGI reserves `stdout` for writing HTTP responses!** Instead, the solution is to write to `stderr`, which WAGI uses for writing messages to its configured log file. `Hopper.log` is a simple built-in function that writes to `stderr`, and it can be viewed as a replacement of Grain's `print` function for writing logs.
+
+Next guide: [Request handling](1-request-handling.md)
