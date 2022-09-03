@@ -1,0 +1,2 @@
+# Tests
+Some tests for Hopper functionality, using [grain-test](https://github.com/alex-snezhko/grain-test). Some of the functions tested in `unitTests.test.gr` are not exported in `hopper.gr` because they are not necessary to expose to the user; to run the tests make sure to temporarily export them. `./run-tests` to run the tests.

@@ -1,0 +1,185 @@
+import Hopper from "../hopper"
+import * from "./grain-test"
+import Map from "map"
+
+let req: Hopper.Request = {
+  _message: {
+    _wagiEnv: Map.make(),
+    _params: Map.make(),
+    _query: Map.make()
+  },
+  _headers: Map.fromList([("Content-Type", "text/plain")]),
+  _body: "Sample request body",
+  _variables: Map.make()
+}
+
+testMultiple("method-string conversions", [
+  ("GET", Hopper.Get),
+  ("POST", Hopper.Post),
+  ("CONNECT", Hopper.Method("CONNECT"))
+], ((str, method)) => {
+  assertThat(Hopper.stringToMethod(str), equals(method))
+  assertThat(Hopper.methodToString(method), equals(str))
+})
+
+testMultiple("status-code conversions", [
+  (200, Hopper.HttpOk),
+  (409, Hopper.Conflict),
+  (110, Hopper.Status(110)),
+], ((code, status)) => {
+  assertThat(Hopper.codeToStatus(code), equals(status))
+  assertThat(Hopper.statusToCode(status), equals(code))
+})
+
+testMultiple("isInformationalStatus", [
+  (Hopper.Continue, true),
+  (Hopper.HttpOk, false),
+  (Hopper.Status(100), true),
+  (Hopper.Status(200), false),
+], ((status, expected)) => {
+  assertThat(Hopper.isInformationalStatus(status), equals(expected))
+})
+
+testMultiple("guessMimeType", [
+  ("hello.txt", "text/plain"),
+  ("package.json", "application/json"),
+  ("noext", "application/octet-stream"),
+], ((fileName, expected)) => {
+  assertThat(Hopper.guessMimeType(fileName), equals(expected))
+})
+
+test("file", () => {
+  let res = Hopper.file("sample.txt")
+  assertThat(res._headers, equals(Map.fromList([("Content-Type", "text/plain")])))
+  assertThat(res._body, equals("First line\nSecond line"))
+
+  let res = Hopper.file("whoops")
+  assertThat(Hopper.status(res), equals(Hopper.NotFound))
+})
+
+let makeRequest = (contentType, body) => {
+  _message: {
+    _wagiEnv: Map.make(),
+    _params: Map.make(),
+    _query: Map.make()
+  },
+  _headers: Map.fromList([("Content-Type", contentType)]),
+  _body: body,
+  _variables: Map.make()
+}: Hopper.Request
+
+testMultiple("urlencodedFormBody", [
+  (
+    "multiple=first&single=val&multiple=second",
+    "application/x-www-form-urlencoded; charset=utf-8",
+    Ok(Map.fromList([("single", Hopper.SingleVal("val")), ("multiple", Hopper.MultiVal(["first", "second"]))]))
+  ),
+  (
+    "multiple=first&single=val&multiple=second",
+    "application/json",
+    Err(Hopper.ContentTypeNotAllowed)
+  )
+], ((body, contentType, expected)) => {
+  let req = makeRequest(contentType, body)
+  assertThat(Hopper.urlencodedFormBody(req), equals(expected))
+})
+
+let body = (
+  "--boundary\n" ++
+  "Content-Disposition: form-data; name=\"textVal\"\n" ++
+  "\n" ++
+  "text1\n" ++
+  "--boundary\n" ++
+  "Content-Disposition: form-data; name=\"fileVal\"; filename=\"file.txt\"\n" ++
+  "Content-Type: text/plain\n" ++
+  "\n" ++
+  "First line\n" ++
+  "Second line\n" ++
+  "\n" ++
+  "--boundary\n" ++
+  "Content-Disposition: form-data; name=\"textVal\"\n" ++
+  "\n" ++
+  "text2\n" ++
+  "--boundary--\n"
+)
+
+testMultiple("multipartFormBody", [
+  (
+    body,
+    "multipart/form-data; boundary=boundary",
+    Ok(Map.fromList([
+      ("textVal", Hopper.MultiVal([Hopper.TextPart("text1"), Hopper.TextPart("text2")])),
+      ("fileVal", Hopper.SingleVal(Hopper.FilePart({
+        filename: "file.txt",
+        contentType: "text/plain",
+        content: "First line\nSecond line\n"
+      })))
+    ]))
+  ),
+  (
+    "",
+    "application/json",
+    Err(Hopper.ContentTypeNotAllowed)
+  ),
+  (
+    "",
+    "multipart/form-data; whoopsnoboundary",
+    Err(Hopper.InvalidFormData("Form data missing boundary"))
+  ),
+  (
+    (
+      "--boundary\n" ++
+      "Content-Disposition: whoopsno-form-data\n" ++
+      "--boundary--"
+    ),
+    "multipart/form-data; boundary=boundary",
+    Err(Hopper.InvalidFormData("Part missing Content-Disposition: form-data header"))
+  )
+], ((body, contentType, expected)) => {
+  let req = makeRequest(contentType, body)
+  assertThat(Hopper.multipartFormBody(req), equals(expected))
+})
+
+test("variables", () => {
+  let req = makeRequest("text/plain", "")
+  assertThat(Hopper.variable("var", req), equals(Err(Hopper.NotSet)))
+  Hopper.setVariable("var", "stringVal", req)
+  assertThat(Hopper.variable("var", req), equals(Ok("stringVal")))
+  Hopper.setVariable("var", 123, req)
+  assertThat(Hopper.variable("var", req), equals(Ok(123)))
+})
+
+// make sure to 'export' preprocessRouteRegex for these tests to run
+testMultiple("route preprocessing", [
+  ("/hello/", "/hello"),
+  ("/hello/a<val1>b/<val(.*)>", "/hello/a(\\w+)b/(.*)"),
+  ("/hello/(\\w+(a|b|c))/<val>", "/hello/(?:\\w+(?:a|b|c))/(\\w+)"),
+  ("/hello/(?!(a|b|c))/<val>", "/hello/(?!(?:a|b|c))/(\\w+)")
+], ((arg, expected)) => {
+  assertThat(Hopper.preprocessRouteRegex(arg), equals(expected))
+})
+
+let expectedHandler = req => Hopper.text("")
+// make sure to 'export' findReqHandler for these tests to run
+testMultiple("path matching - single", [
+  ("/asdf/hi/", Hopper.scope("/asdf/", [Hopper.get("/hi", expectedHandler)]), []),
+  ("/hello-there.png/", Hopper.get("/hello-there\\.png", expectedHandler), []),
+  ("/hello/hi/end/", Hopper.get("/(he(.*)o)/<val>/end", expectedHandler), [("val", "hi")]),
+  ("/hello/hi/end", Hopper.get("/.*/<val>/end/", expectedHandler), [("val", "hi")]),
+  ("/hello/hi", Hopper.get("/<path_val(.*)>", expectedHandler), [("path_val", "hello/hi")]),
+  ("/asdf/hello/hi", Hopper.scope("/asdf/([^/])*", [Hopper.get("/<val>", expectedHandler)]), [("val", "hi")]),
+], ((path, route, expectedParams)) => {
+  let (actualHandler, actualParams) = Hopper.findReqHandler(Hopper.Get, path, route)
+  assertThat(expectedHandler, equals(actualHandler))
+  assertThat(Map.fromList(expectedParams), equals(actualParams))
+})
+
+// make sure to 'export' findReqHandler for these tests to run
+testMultiple("path matching - single - not matched", [
+  ("/hello/hi", Hopper.scope("/hello$", [Hopper.get("/hi", expectedHandler)])),
+  ("/hello/hi/more", Hopper.get("/hi/more", expectedHandler)),
+  ("/hello/hi/more", Hopper.get("/hello/hi", expectedHandler)),
+], ((path, route)) => {
+  let (actualHandler, _) = Hopper.findReqHandler(Hopper.Get, path, route)
+  assertThat(expectedHandler, notEquals(actualHandler))
+})

@@ -1,0 +1,373 @@
+/**
+ * @module grain-test: A simple testing framework for grain
+ * 
+ * version 0.1.0; works with Grain v0.5
+ */
+import Option from "option"
+import Result from "result"
+import String from "string"
+import List from "list"
+import Array from "array"
+import Process from "sys/process"
+
+let detectEnvVar = (var) => Array.contains("GRAIN_TEST_" ++ var ++ "=true", match (Process.env()) {
+  Ok(envArray) => envArray,
+  Err(_) => [>]
+})
+let runningInTesterScript = detectEnvVar("SCRIPT")
+let plainOutput = detectEnvVar("PLAIN_OUTPUT")
+let onlyFailing = detectEnvVar("ONLY_FAILING")
+let bailUponFailure = detectEnvVar("BAIL_UPON_FAILURE")
+
+let red = (msg) => if (!plainOutput) "\x1b[31m" ++ msg ++ "\x1b[0m" else msg
+let green = (msg) => if (!plainOutput) "\x1b[32m" ++ msg ++ "\x1b[0m" else msg
+let cyan = (msg) => if (!plainOutput) "\x1b[36m" ++ msg ++ "\x1b[0m" else msg
+
+let mut failedAssertions = []
+let mut encounteredFailure = false
+
+let failedMessage = (currTest) => red((if (!plainOutput) "✗ " else "failed: ") ++ currTest)
+
+let passedMessage = (currTest) => green((if (!plainOutput) "✓ " else "passed: ") ++ currTest)
+
+let executeTest = (testSuiteName, testName, beforeEaches, afterEaches, runTest) => {
+  // short-circuit if the --bail-upon-failure flag was set by the test runner and a previous test failed
+  if (bailUponFailure && encounteredFailure) {
+    false
+  } else {
+    List.forEach((fn) => fn(), beforeEaches)
+    failedAssertions = []
+    runTest()
+    List.forEach((fn) => fn(), afterEaches)
+
+    let testPassed = List.length(failedAssertions) == 0
+    if (testPassed) {
+      if (!onlyFailing) {
+        print(passedMessage(testName) ++ "\n")
+      }
+    } else {
+      print(failedMessage(testName))
+      List.forEach(m => print("  " ++ red(if (!plainOutput) "● " else "- ") ++ m), List.reverse(failedAssertions))
+      print("")
+      encounteredFailure = true
+    }
+
+    if (runningInTesterScript) {
+      // somewhat hacky solution to get number of tests passed/failed to be read when running from the tester script
+      print("___RUNNING_IN_SCRIPT_TEST_" ++ (if (testPassed) "PASSED" else "FAILED") ++ "_MARKER___")
+    }
+
+    testPassed
+  }
+}
+
+let executeTestMultiple = (testSuiteName, testMultName, beforeEaches, afterEaches, runs, runTest) => {
+  let testsPassed = List.mapi((run, i) => {
+    let testName = testMultName ++ " - run " ++ toString(i + 1) ++ " (test data: " ++ toString(run) ++ ")"
+    executeTest(testSuiteName, testName, beforeEaches, afterEaches, () => runTest(run))
+  }, runs)
+
+  List.every(identity, testsPassed)
+}
+
+/**
+ * An `enum` of all of the possible values that can be included in a test suite.
+ * 
+ * Use `BeforeEach` to run a function before each test in the suite.
+ * 
+ * Use `AfterEach` to run a function after each test in the suite.
+ * 
+ * Use `BeforeAll` to run a function before running the tests in the test suite. Note: `BeforeAll` will run before the first `BeforeEach` if both are given.
+ * 
+ * Use `AfterAll` to run a function after running all the tests in the test suite. Note: `AfterAll` will run after the last `AfterEach` if both are given.
+ * 
+ * Use `Test` to run a test as part of a test suite. Behavior is similar to the standalone `test` function.
+ * 
+ * Use `TestMultiple` to run a test function against multiple inputs. Behavior is similar to the standalone `testMultiple` function.
+ */
+export enum TestSuiteItem<a> {
+  BeforeEach(() -> Void),
+  AfterEach(() -> Void),
+  BeforeAll(() -> Void),
+  AfterAll(() -> Void),
+  Test(String, () -> Void),
+  TestMultiple(String, List<a>, (a) -> Void)
+}
+
+/**
+ * Run a test suite, defined by a list of `TestSuiteItem`s that are run as part of the suite.
+ * 
+ * @param testSuiteName: the name of the test suite
+ * @param testSuiteItem: a list of test suite items that encompass the test suite
+ */
+export let testSuite = (testSuiteName, testSuiteItems) => {
+  let suiteIntro = "---- Test suite " ++ testSuiteName ++ " ----"
+  print("---- Test suite " ++ cyan(testSuiteName) ++ " ----\n")
+  let (beforeEaches, afterEaches, beforeAlls, afterAlls, tests) = List.reduceRight(
+    (item, (be, ae, ba, aa, tests)) => match (item) {
+      BeforeEach(fn) => ([fn, ...be], ae, ba, aa, tests),
+      AfterEach(fn) =>  (be, [fn, ...ae], ba, aa, tests),
+      BeforeAll(fn) =>  (be, ae, [fn, ...ba], aa, tests),
+      AfterAll(fn) =>   (be, ae, ba, [fn, ...aa], tests),
+      x =>              (be, ae, ba, aa, [x, ...tests])
+    },
+    ([], [], [], [], []),
+    testSuiteItems
+  )
+
+  List.forEach((fn) => fn(), beforeAlls)
+
+  let testsPassed = List.map((test) => match (test) {
+    Test(testName, runTest) => executeTest(Some(testSuiteName), testName, beforeEaches, afterEaches, runTest),
+    TestMultiple(testMultName, runs, runTest) => executeTestMultiple(Some(testSuiteName), testMultName, beforeEaches, afterEaches, runs, runTest),
+    _ => false
+  }, tests)
+
+  let testSuitePassed = List.every(identity, testsPassed)
+
+  List.forEach((fn) => fn(), afterAlls)
+
+  print(Array.reduce((s, _) => s ++ "-", "", String.explode(suiteIntro)) ++ "\n")
+
+  if (runningInTesterScript) {
+    // somewhat hacky solution to get number of test suites passed/failed to be read when running from the tester script
+    print("___RUNNING_IN_SCRIPT_TEST_SUITE_" ++ (if (testSuitePassed) "PASSED" else "FAILED") ++ "_MARKER___")
+  }
+}
+
+/**
+ * Run a single test case, consisting of zero or more assertions
+ * 
+ * @param testName: a description of what the test is doing
+ * @param runTest: a function that runs the test case
+ */
+export let test = (testName, runTest) => {
+  executeTest(None, testName, [], [], runTest)
+}
+
+/**
+ * Run a test with a number of different inputs and expected outputs
+ * 
+ * @param testMultName: a description of what the test is doing
+ * @param runs: a list of data to run the test against. Each item will get passed to the test function and can then be referenced in the test
+ * @param runTest: a function that runs the test case
+ */
+export let testMultiple = (testMultName, runs, runTest) => {
+  executeTestMultiple(None, testMultName, [], [], runs, runTest)
+}
+
+/**
+ * Info about the status of an assertion made during a test
+ */
+export record AssertionInfo {
+  passed: Bool,
+  computeFailMsg: () -> String
+}
+
+let evaluatedMatcher = (passed, computeFailMsg) => {
+  { passed, computeFailMsg }
+}
+
+let colorValue = (value) => cyan(toString(value))
+
+/**
+ * A matcher creator function that checks if two values are equal to each other
+ * 
+ * @param other: the value the matcher will compare against
+ * 
+ * @returns a matcher that succeeds if the value being matched against is equal to the value given to create the matcher
+ */
+export let equals = (other) => (value) => evaluatedMatcher(
+  other == value,
+  () => colorValue(value) ++ " to equal " ++ colorValue(other)
+)
+
+/**
+ * A matcher creator function that checks if two values are not equal to each other
+ * 
+ * @param other: the value the matcher will compare against
+ * 
+ * @returns a matcher that succeeds if the value being matched against is not equal to the value given to create the matcher
+ */
+export let notEquals = (other) => (value) => evaluatedMatcher(
+  other != value,
+  () => colorValue(value) ++ " not to equal " ++ colorValue(other)
+)
+
+/**
+ * A matcher function that checks if a value is `true`
+ * 
+ * @returns a matcher that succeeds if the value being matched against is `true`
+ */
+export let isTrue = (value) => evaluatedMatcher(
+  value == true,
+  () => colorValue(value) ++ " to be " ++ colorValue("true")
+)
+
+/**
+ * A matcher function that checks if a value is `false`
+ * 
+ * @returns a matcher that succeeds if the value being matched against is `false`
+ */
+export let isFalse = (value) => evaluatedMatcher(
+  value == false,
+  () => colorValue(value) ++ " to be " ++ colorValue("false")
+)
+
+/**
+ * A matcher function that checks if an `Option` is `None`
+ * 
+ * @returns a matcher that succeeds if the `Option` value being matched against is `None`
+ */
+export let isNone = (value) => evaluatedMatcher(
+  Option.isNone(value),
+  () => colorValue(value) ++ " to be a " ++ colorValue("None") ++ " Option"
+)
+
+/**
+ * A matcher function that checks if an `Option` is contentful i.e. the `Some` variant
+ * 
+ * @returns a matcher that succeeds if the `Option` value being matched against is contentful
+ */
+export let isSome = (value) => evaluatedMatcher(
+  Option.isSome(value),
+  () => colorValue(value) ++ " to be a " ++ colorValue("Some") ++ " Option"
+)
+
+/**
+ * A matcher function that checks if a `Result` is the `Ok` variant
+ * 
+ * @returns a matcher that succeeds if the `Result` value being matched against is the `Ok` variant
+ */
+export let isOk = (value) => evaluatedMatcher(
+  Result.isOk(value),
+  () => colorValue(value) ++ " to be an " ++ colorValue("Ok") ++ " Result"
+)
+
+/**
+ * A matcher function that checks if a `Result` is the `Err` variant
+ * 
+ * @returns a matcher that succeeds if the `Result` value being matched against is the `Err` variant
+ */
+export let isErr = (value) => evaluatedMatcher(
+  Result.isErr(value),
+  () => colorValue(value) ++ " to be an " ++ colorValue("Err") ++ " Result"
+)
+
+let matchMultiple = (matchers, matchAll) => (value) => {
+  let (aggregateFn, joinDelim, prefixIfTwo) = if (matchAll) {
+    (List.every, " and ", "both ")
+  } else {
+    (List.some, " or ", "either ")
+  }
+
+  let evaluated = List.map((fn) => fn(value), matchers)
+  evaluatedMatcher(
+    aggregateFn((test) => test.passed, evaluated),
+    () => (if (List.length(evaluated) == 2) prefixIfTwo else "") ++
+      List.join(joinDelim, List.map((test) => "(" ++ test.computeFailMsg() ++ ")", evaluated))
+  )
+}
+
+/**
+ * A matcher creator that checks the opposite of the given matcher
+ * 
+ * @param matcher: a matcher to check the success of
+ * 
+ * @returns a matcher that succeeds if the given matcher fails
+ */
+export let not = (matcher) => (value) => {
+  let { passed, computeFailMsg } = matcher(value)
+  evaluatedMatcher(!passed, () => "not (" ++ computeFailMsg() ++ ")")
+}
+
+/**
+ * A matcher creator function that checks if two matchers both succeed
+ * 
+ * @param first: the first matcher to check the success of
+ * @param second: the second matcher to check the success of
+ * 
+ * @returns a matcher that succeeds if both matchers succeed
+ */
+export let both = (first, second) => matchMultiple([first, second], true)
+
+/**
+ * A matcher creator function that checks if either of two matchers succeed
+ * 
+ * @param first: the first matcher to check the success of
+ * @param second: the second matcher to check the success of
+ * 
+ * @returns a matcher that succeeds if either of the two matchers succeed
+ */
+export let either = (first, second) => matchMultiple([first, second], false)
+
+/**
+ * A matcher creator function that checks if all of the given matchers succeed
+ * 
+ * @param matchers: the list of matcher to check the success of
+ * 
+ * @returns a matcher that succeeds if all of the given matchers succeed
+ */
+export let all = (matchers) => matchMultiple(matchers, true)
+
+/**
+ * A matcher creator function that checks if any of the given matchers succeed
+ * 
+ * @param matchers: the list of matcher to check the success of
+ * 
+ * @returns a matcher that succeeds if any of the given matchers succeed
+ */
+export let any = (matchers) => matchMultiple(matchers, false)
+
+/**
+ * A matcher creator creator (yes, you read that right) that defines a matcher creator based on custom matching logic
+ * 
+ * @param runFn: a function to run to determine the success of the matcher;
+ *  receives both the value being matched against and the value the returned matcher creator is invoked with.
+ *  This function should return an AssertionInfo object
+ * 
+ * @returns a matcher creator that can be given a value to match against
+ */
+export let binaryMatcher: ((a, b) -> AssertionInfo) -> a -> b -> AssertionInfo = (runFn) => (other) => (value) => {
+  runFn(value, other)
+}
+
+/**
+ * A matcher creator that defines a matcher based on custom matching logic
+ * 
+ * @param runFn: a function to run to determine the success of the matcher;
+ *  receives the value being matched against. This function should return an AssertionInfo object
+ * 
+ * @returns a matcher creator that can be given a value to match against
+ */
+export let unaryMatcher: ((a) -> AssertionInfo) -> a -> AssertionInfo = (runFn) => (value) => {
+  runFn(value)
+}
+
+/**
+ * Asserts that a value fulfills a given matcher (note: does not use the native grain `assert`)
+ * 
+ * @param value: a value to match against
+ * @param matcher: a matcher to apply to the value
+ */
+export let assertThat = (value, matcher) => {
+  match (matcher(value)) {
+    { passed: true, _ } => void,
+    { passed: false, computeFailMsg } => failedAssertions = ["Expected " ++ computeFailMsg(), ...failedAssertions]
+  }
+}
+
+/**
+ * Asserts that a value fulfills a given matcher, with a message to display upon failure (the message is prepended with `"Expected that "` in output).
+ * (note: does not use the native grain `assert`)
+ * 
+ * @param message: a message to be printed in the case that the assertion fails
+ * @param value: a value to match against
+ * @param matcher: a matcher to apply to the value
+ */
+export let assertWithMsgThat = (message, value, matcher) => {
+  match (matcher(value)) {
+    { passed: true, _ } => void,
+    { passed: false, _ } => failedAssertions = ["Expected that " ++ message, ...failedAssertions]
+  }
+}

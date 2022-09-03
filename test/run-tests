@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+import os
+import re
+import argparse
+
+parser = argparse.ArgumentParser(description='A grain-test test runner script')
+parser.add_argument('-r', '--regex', default='.+\.test\.gr$', help='Regex to use to match test files relative to the location of this script. Default is .+\.test\.gr$')
+parser.add_argument('-d', '--dir', default='.', help='Directory in which tests are located')
+parser.add_argument('-e', '--exclude-dir', action='append', default=[], help='Directories to exclude when searching for test files')
+parser.add_argument('-f', '--only-failing', action='store_true', help='A flag to indicate that only failing tests should be shown')
+parser.add_argument('-p', '--plain', action='store_true', help='A flag to indicate that output should be given without any dressing i.e. text coloring, special unicode characters')
+parser.add_argument('-b', '--bail-upon-failure', action='store_true', help='A flag to indicate that no more tests should be ran after the first failing test')
+args = parser.parse_args()
+
+test_file_pattern = re.compile(args.regex)
+
+num_tests_passed = 0
+num_tests_failed = 0
+num_suites_passed = 0
+num_suites_failed = 0
+
+def red(s):
+    return f'\x1b[31m{s}\x1b[0m' if not args.plain else s
+
+def green(s):
+    return f'\x1b[32m{s}\x1b[0m' if not args.plain else s
+
+def cyan(s):
+    return f'\x1b[36m{s}\x1b[0m' if not args.plain else s
+
+exclude_dirs = [os.path.normpath(d) for d in args.exclude_dir]
+
+for root, _, files in os.walk(args.dir):
+    normed_path = os.path.normpath(root)
+    if any(normed_path.startswith(d) for d in exclude_dirs):
+        continue
+
+    test_files = [os.path.join(root, file) for file in files if test_file_pattern.match(os.path.join(root, file))]
+    for test_file_path in test_files:
+        if args.bail_upon_failure and num_tests_failed > 0:
+            break
+
+        compilation = os.popen(f'grain compile {test_file_path}')
+        if compilation.close():
+            print(red(f'Failed to compile {test_file_path}; skipping tests'))
+            continue
+        
+        env_vars = ' '.join(f'GRAIN_TEST_{x}=true' for x in [
+            'SCRIPT',
+            'PLAIN_OUTPUT' if args.plain else None,
+            'ONLY_FAILING' if args.only_failing else None,
+            'BAIL_UPON_FAILURE' if args.bail_upon_failure else None
+        ] if x)
+        output_proc = os.popen(f'{env_vars} grain run {test_file_path}.wasm')
+        output_lines = output_proc.readlines()
+        
+        print(f'Running {cyan(test_file_path)}')
+        if output_proc.close():
+            print(f'An error was encountered when running {cyan(test_file_path)}:')
+            print('\n'.join(output_lines))
+            continue
+        
+        contentful_output_lines = []
+        for line in output_lines:
+            if line == '___RUNNING_IN_SCRIPT_TEST_PASSED_MARKER___\n':
+                num_tests_passed += 1
+            elif line == '___RUNNING_IN_SCRIPT_TEST_FAILED_MARKER___\n':
+                num_tests_failed += 1
+            elif line == '___RUNNING_IN_SCRIPT_TEST_SUITE_PASSED_MARKER___\n':
+                num_suites_passed += 1
+            elif line == '___RUNNING_IN_SCRIPT_TEST_SUITE_FAILED_MARKER___\n':
+                num_suites_failed += 1
+            else:
+                contentful_output_lines.append(line)
+
+        os.remove(f'{test_file_path}.wasm')
+        print(''.join(f'  {line}' for line in contentful_output_lines))
+    else:
+        continue
+    break
+
+def passed_failed_msg(passed, failed):
+    passed_part = green(f'{passed} passed') if passed else ''
+    failed_part = red(f'{failed} failed') if failed else ''
+    return ', '.join(x for x in [passed_part, failed_part] if x)
+
+if num_suites_passed + num_suites_failed != 0:
+    print(f'Test suites: {passed_failed_msg(num_suites_passed, num_suites_failed)}')
+
+if num_tests_passed + num_tests_failed != 0:
+    print(f'Tests: {passed_failed_msg(num_tests_passed, num_tests_failed)}')
