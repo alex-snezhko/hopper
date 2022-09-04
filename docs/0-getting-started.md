@@ -46,6 +46,6 @@ Hello, world!
 ```
 
 ## ⚠️ A note about logging
-Often times it is desired to write log messages for debugging or logging significant application events. **️ Please note that you should NOT write to `stdout` for logging e.g. through Grain's built-in `print` function. WAGI reserves `stdout` for writing HTTP responses!** Instead, the solution is to write to `stderr`, which WAGI uses for writing messages to its configured log file. `Hopper.log` is a simple built-in function that writes to `stderr`, and it can be viewed as a replacement of Grain's `print` function for writing logs.
+Often times it is desired to write log messages for debugging or logging significant application events. **Please note that you should NOT write to `stdout` for logging e.g. through Grain's built-in `print` function. WAGI reserves `stdout` for writing HTTP responses!** Instead, the solution is to write to `stderr`, reserved by WAGI for writing to the configured log file (which is in a temporary directory by default, but the CLI flag `--log-dir <desired_directory>` can be used when running WAGI to specify a directory). `Hopper.log` is a simple built-in function that writes to `stderr`, and it can be viewed as a replacement of Grain's `print` function for writing logs.
 
 Next guide: [Request handling](1-request-handling.md)

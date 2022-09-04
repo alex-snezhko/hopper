@@ -152,6 +152,7 @@ test("variables", () => {
 // make sure to 'export' preprocessRouteRegex for these tests to run
 testMultiple("route preprocessing", [
   ("/hello/", "/hello"),
+  ("/hello/<val(\\w+)>/<val2(\\w+)>/end", "/hello/(\\w+)/(\\w+)/end"),
   ("/hello/a<val1>b/<val(.*)>", "/hello/a(\\w+)b/(.*)"),
   ("/hello/(\\w+(a|b|c))/<val>", "/hello/(?:\\w+(?:a|b|c))/(\\w+)"),
   ("/hello/(?!(a|b|c))/<val>", "/hello/(?!(?:a|b|c))/(\\w+)")
@@ -162,9 +163,11 @@ testMultiple("route preprocessing", [
 let expectedHandler = req => Hopper.text("")
 // make sure to 'export' findReqHandler for these tests to run
 testMultiple("path matching - single", [
+  ("/", Hopper.get("/", expectedHandler), []),
+  ("/", Hopper.scope("/", [Hopper.get("/", expectedHandler)]), []),
   ("/asdf/hi/", Hopper.scope("/asdf/", [Hopper.get("/hi", expectedHandler)]), []),
   ("/hello-there.png/", Hopper.get("/hello-there\\.png", expectedHandler), []),
-  ("/hello/hi/end/", Hopper.get("/(he(.*)o)/<val>/end", expectedHandler), [("val", "hi")]),
+  ("/hello/hi", Hopper.get("/(he(.*)o)/<val>", expectedHandler), [("val", "hi")]),
   ("/hello/hi/end", Hopper.get("/.*/<val>/end/", expectedHandler), [("val", "hi")]),
   ("/hello/hi", Hopper.get("/<path_val(.*)>", expectedHandler), [("path_val", "hello/hi")]),
   ("/asdf/hello/hi", Hopper.scope("/asdf/([^/])*", [Hopper.get("/<val>", expectedHandler)]), [("val", "hi")]),

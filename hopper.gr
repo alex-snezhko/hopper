@@ -48,6 +48,13 @@ export enum OneOrMany<a> {
   MultiVal(List<a>)
 }
 
+// underscore prefix to discourage direct record field access
+
+/**
+ * Represents request-specific message data (this simply contains data
+ * injected into `Message<a>` to make `Request` as `Message<RequestMsgData>`).
+ * Typically you should not access the fields of this record directly.
+ */
 export record RequestMsgData {
   _wagiEnv: Map.Map<String, String>,
   _params: Map.Map<String, String>,
@@ -118,12 +125,21 @@ export enum Status {
   Status(Number)
 }
 
-// underscore prefix to discourage direct record field access
 
+/**
+ * Represents response-specific message data (this simply contains data
+ * injected into `Message<a>` to make `Response` as `Message<ResponseMsgData>`).
+ * Typically you should not access the fields of this record directly.
+ */
 export record ResponseMsgData {
   _status: Status
 }
 
+/**
+ * Opaque polymorphic representation of an HTTP message (concretely instanced
+ * by `Request` and `Response` types). Typically you should not access the
+ * fields of this record directly.
+ */
 export record Message<a> {
   _message: a,
   _headers: Map.Map<String, String>,
@@ -162,7 +178,7 @@ record Route {
 },
 enum RouteHandler {
   Endpoint(RequestMethods, RequestHandler),
-  Router(Middleware, List<Route>)
+  Scope(Middleware, List<Route>)
 }
 
 /**
@@ -203,6 +219,10 @@ export enum GetVariableError {
   DeserializationError(String),
 }
 
+/**
+ * Represents the result of fetching a message variable. A `Result` with an
+ * `Ok` variant containing the value or `GetVariableError` `Err` variant.
+ */
 export type Variable<a> = Result<a, GetVariableError>
 
 /**
@@ -514,6 +534,12 @@ export let guessMimeType = fileName => {
   }
 }
 
+/**
+ * Utility function to combine multiple middlewares into one function.
+ * 
+ * @param mws: The middlewares to combine
+ * @returns A single middleware function, chaining the first middleware in the list down to the last
+ */
 export let middlewares: List<Middleware> -> Middleware = mws => handler => {
   List.reduceRight((mw, handler) => mw(handler), handler, mws)
 }
@@ -763,7 +789,7 @@ export let all = (path, handler) => {
  * @returns A new `Route` handling requests rooted from the path
  */
 export let scopeWithMiddleware = (path, middleware, routes) => {
-  { path, routeHandler: Router(middleware, routes) }
+  { path, routeHandler: Scope(middleware, routes) }
 }
 
 /**
@@ -922,6 +948,12 @@ export let method = (req: Request) => {
   getReqMethod(req._message._wagiEnv)
 }
 
+/**
+ * Fetches the HTTP response status of a response.
+ * 
+ * @param res: The response to examine
+ * @returns The status of the response
+ */
 export let status = (res: Response) => {
   res._message._status
 }
@@ -1182,12 +1214,13 @@ let getQueryMap = () => {
 // a bit of a hack to not capture regex groups specified in route.
 // if something is going wrong with matching patterns it may be due to this
 let captureGroupRegex = Result.unwrap(Regex.make("(?<!\\\\)\\((?!\\?)"))
-let replaceWithCapturesRegex = Result.unwrap(Regex.make("<\\w+\\(\\?:(.*)\\)>"))
+let replaceWithCapturesRegex = Result.unwrap(Regex.make("<\\w+\\(\\?:(.+?)\\)>"))
 let paramRegex = Result.unwrap(Regex.make("<\\w+>"))
-let customParamRegex = Result.unwrap(Regex.make("<\\w+\\((.*)\\)>"))
+let customParamRegex = Result.unwrap(Regex.make("<\\w+\\((.+?)\\)>"))
 let paramNameRegex = Result.unwrap(Regex.make("<(\\w+)>"))
-let customParamNameRegex = Result.unwrap(Regex.make("<(\\w+)\\(.*\\)>"))
-let slashAtEndRegex = Result.unwrap(Regex.make("/$"))
+let customParamNameRegex = Result.unwrap(Regex.make("<(\\w+)\\(.+?\\)>"))
+// lookbehind to prevent single slash character from being matched
+let slashAtEndRegex = Result.unwrap(Regex.make("(?<=.)/$"))
 
 // TODO remove export
 export let preprocessRouteRegex = route => {
@@ -1269,7 +1302,7 @@ export let findReqHandler = (reqMethod, path, route) => {
               _ => RouteFound(reqHandler)
             })
           },
-          Router(middleware, routeHandlers) => {
+          Scope(middleware, routeHandlers) => {
             let nextPathSegment = String.slice(thisPathEndI, String.length(pathSegment), pathSegment)
             let nextPathSegment = if (!String.startsWith("/", nextPathSegment)) "/" ++ nextPathSegment else nextPathSegment
             let (bestMatchMw, bestMatchRms) = List.reduce(
@@ -1316,7 +1349,7 @@ export let findReqHandler = (reqMethod, path, route) => {
 export let serveWithMiddleware = (middleware, routes) => {
   let wagiEnv = getWagiEnv()
 
-  let rootRoute = { path: "/", routeHandler: Router(middleware, routes) }
+  let rootRoute = scopeWithMiddleware("/", middleware, routes)
   let (reqHandler, params) = findReqHandler(getReqMethod(wagiEnv), getPath(wagiEnv), rootRoute)
   let request = {
     _message: {
