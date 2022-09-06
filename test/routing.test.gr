@@ -1,0 +1,222 @@
+import Hopper from "../hopper"
+import * from "./grain-test"
+import Map from "map"
+
+let makeRequest = body => {
+  _message: {
+    _wagiEnv: Map.make(),
+    _params: Map.make(),
+    _query: Map.make()
+  },
+  _headers: Map.fromList([("Content-Type", "text/plain")]),
+  _body: body,
+  _variables: Map.make()
+}: Hopper.Request
+
+// make sure to 'export' preprocessRouteSegmentRegex for these tests to run
+testMultiple("route segment preprocessing", [
+  ("/hello/", "/hello"),
+  ("hello", "/hello"),
+  ("/hello/<val(\\w+)>/<val2(\\w+)>/end", "/hello/(\\w+)/(\\w+)/end"),
+  ("/hello/a<val1>b/<val(.*)>", "/hello/a(\\w+)b/(.*)"),
+  ("/hello/(\\w+(a|b|c))/<val>", "/hello/(?:\\w+(?:a|b|c))/(\\w+)"),
+  ("/hello/(?!(a|b|c))/<val>", "/hello/(?!(?:a|b|c))/(\\w+)")
+], ((arg, expected)) => {
+  assertThat(Hopper.preprocessRouteSegmentRegex(arg), equals(expected))
+})
+
+let expectedHandler = req => Hopper.text("")
+testMultiple("allReqHandlers", [
+  (
+    Hopper.get("/", expectedHandler),
+    [("/", [], Hopper.Methods([Hopper.Get]), expectedHandler)]
+  ),
+  (
+    Hopper.scope("/asdf", [
+      Hopper.get("/abc", expectedHandler),
+      Hopper.get("/hi", expectedHandler)
+    ]),
+    [
+      ("/asdf/abc", [], Hopper.Methods([Hopper.Get]), expectedHandler),
+      ("/asdf/hi", [], Hopper.Methods([Hopper.Get]), expectedHandler),
+    ]
+  ),
+  (
+    Hopper.scope("/asdf/", [
+      Hopper.get("/abc/", expectedHandler),
+      Hopper.get("hi", expectedHandler)
+    ]),
+    [
+      ("/asdf/abc", [], Hopper.Methods([Hopper.Get]), expectedHandler),
+      ("/asdf/hi", [], Hopper.Methods([Hopper.Get]), expectedHandler),
+    ]
+  ),
+  (
+    Hopper.scope("/", [Hopper.get("/", expectedHandler)]),
+    [("/", [], Hopper.Methods([Hopper.Get]), expectedHandler)]
+  )
+], ((arg, expected)) => {
+  assertThat(Hopper.allReqHandlers(arg), equals(expected))
+})
+
+// make sure to 'export' findReqHandler for these tests to run
+testMultiple("path matching - single", [
+  (
+    "/",
+    Hopper.get("/", expectedHandler),
+    []
+  ),
+  (
+    "/",
+    Hopper.scope("/", [Hopper.get("/", expectedHandler)]),
+    []
+  ),
+  (
+    "/",
+    Hopper.scope("/", [Hopper.scope("/", [Hopper.get("/", expectedHandler)])]),
+    []
+  ),
+  (
+    "/asdhjv.209grn.a0122nvs.a",
+    Hopper.get(".*", expectedHandler),
+    []
+  ),
+  (
+    "/asdf/hi/",
+    Hopper.scope("/asdf/", [Hopper.get("/hi", expectedHandler)]),
+    []
+  ),
+  (
+    "/asdf/hi/",
+    Hopper.scope("asdf", [Hopper.get("hi", expectedHandler)]),
+    []
+  ),
+  (
+    "/hello-there.png/",
+    Hopper.get("/hello-there\\.png", expectedHandler),
+    []
+  ),
+  (
+    "/hello/hi",
+    Hopper.get("/(he(.*)o)/<val>", expectedHandler),
+    [("val", "hi")]
+  ),
+  (
+    "/hello/hi/end",
+    Hopper.get("/.*/<val>/end/", expectedHandler),
+    [("val", "hi")]
+  ),
+  (
+    "/hello/hi",
+    Hopper.get("/<path_val(.*)>", expectedHandler),
+    [("path_val", "hello/hi")]
+  ),
+  (
+    "/asdf/hello/hi",
+    Hopper.scope("/asdf/([^/])*", [Hopper.get("/<val>", expectedHandler)]),
+    [("val", "hi")]
+  ),
+  (
+    "/asdf/hello",
+    Hopper.scope("/<first>", [Hopper.get("/<second>", expectedHandler)]),
+    [("first", "asdf"), ("second", "hello")]
+  ),
+  (
+    "/first.all/asdf-more/hello-all",
+    Hopper.scope("/<first(.*)>", [Hopper.get("/<second>.*/<last([\\w-]+)>", expectedHandler)]),
+    [("first", "first.all"), ("second", "asdf"), ("last", "hello-all")]
+  ),
+  (
+    "/asdf/hello",
+    Hopper.scope("/.*", [Hopper.get("/<val>", expectedHandler)]),
+    [("val", "hello")]
+  )
+], ((path, route, expectedParams)) => {
+  let (actualHandler, actualParams) = Hopper.findReqHandler(Hopper.Get, path, route)
+  assertThat(expectedHandler, equals(actualHandler))
+  assertThat(Map.fromList(expectedParams), equals(actualParams))
+})
+
+// make sure to 'export' findReqHandler for these tests to run
+testMultiple("path matching - single - not found", [
+  ("/hello/hi", Hopper.scope("/hello$", [Hopper.get("/hi", expectedHandler)])),
+  ("/hello/hi/more", Hopper.get("/hi/more", expectedHandler)),
+  ("/hello/hi/more", Hopper.get("/hello/hi", expectedHandler)),
+  ("/hello/hi", Hopper.scope("/hel", [Hopper.get("/hi", expectedHandler)])),
+  ("/hello", Hopper.get("/hel", expectedHandler)),
+  ("/hel/lo", Hopper.scope("/hel", [Hopper.get("/", expectedHandler)])),
+], ((path, route)) => {
+  let (actualHandler, _) = Hopper.findReqHandler(Hopper.Get, path, route)
+  assertThat(expectedHandler, notEquals(actualHandler))
+})
+
+// make sure to 'export' findReqHandler for these tests to run
+testMultiple("path matching - single - method not accepted", [
+  (
+    "/hello",
+    Hopper.get("/hello", expectedHandler),
+    Hopper.Post,
+    Some("GET")
+  ),
+  (
+    "/hello",
+    Hopper.all("/hello", expectedHandler),
+    Hopper.Post,
+    None
+  ),
+  (
+    "/hello/hi",
+    Hopper.scope("/", [
+      Hopper.scope("/hello", [
+        Hopper.get("/hi", expectedHandler),
+        Hopper.post(".*", expectedHandler)
+      ]),
+      Hopper.scope("/.*", [
+        Hopper.put("/hi", expectedHandler),
+      ]),
+    ]),
+    Hopper.Delete,
+    Some("GET, POST, PUT")
+  ),
+], ((path, route, method, allowed)) => {
+  let (actualHandler, _) = Hopper.findReqHandler(method, path, route)
+  let res = actualHandler(makeRequest("sample"))
+  assertThat(Hopper.header("Allow", res), equals(allowed))
+})
+
+let prefixMw = prefixWith => {
+  next => req => {
+    let res = next(req)
+    Hopper.response(Hopper.status(res), Hopper.headers(res), prefixWith ++ "-" ++ Hopper.body(res))
+  }
+}
+
+testMultiple("with middleware", [
+  (
+    "/hi",
+    Hopper.get("/hi", prefixMw("1")(prefixMw("2")(req => {
+      Hopper.text("3")
+    }))),
+    "1-2-3"
+  ),
+  (
+    "/hi",
+    Hopper.get("/hi", Hopper.middlewares([prefixMw("1"), prefixMw("2")])(req => {
+      Hopper.text("3")
+    })),
+    "1-2-3"
+  ),
+  (
+    "/hello/hi",
+    Hopper.scopeWithMiddleware("/hello", prefixMw("1"), [
+      Hopper.get("/hi", prefixMw("2")(req => {
+        Hopper.text("3")
+      })),
+    ]),
+    "1-2-3"
+  ),
+], ((path, route, expectedBody)) => {
+  let (reqHandler, _) = Hopper.findReqHandler(Hopper.Get, path, route)
+  let res = reqHandler(makeRequest(""))
+  assertThat(Hopper.body(res), equals(expectedBody))
+})

@@ -71,6 +71,13 @@ Hopper.text("Hello there") // response with Content-Type: text/plain
 Hopper.json("{\"name\": \"val\"}") // response with Content-Type: application/json
 Hopper.contentType("text/html", "<body><p>I am HTML</p></body>")
 Hopper.newStatus(Hopper.BadRequest, Hopper.text("Whoops")) // response with content of text response but 400 status
+
+// the following can be used to create redirection responses
+
+// for redirecting to another path of the application; both use status code 302 Found
+Hopper.redirectLocal("/other-path", req)
+// for redirecting to any arbitrary URL
+Hopper.redirectExternal("https://www.google.com")
 ```
 
 ### Request/Response-specific Data

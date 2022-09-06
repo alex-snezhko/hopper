@@ -41,7 +41,7 @@ Responded with 200
 ```
 
 ## Middlewares On Scopes
-Middlewares can also be added to `Hopper.scope`s, in which case the middleware will be applied to all requests in the scope (including to paths without handlers, in which case the middleware will process the `404 Not Found` or `405 Method Not Allowed` response)
+Middlewares can also be added to scopes, in which case the middleware will be applied to all requests in the scope (including to paths without handlers, in which case the middleware will process the `404 Not Found` or `405 Method Not Allowed` response)
 ```
 Hopper.serve([
   Hopper.scopeWithMiddleware("/", withLogging, [

@@ -167,7 +167,8 @@ export type RequestHandler = Request -> Response
  */
 export type Middleware = RequestHandler -> RequestHandler
 
-enum RequestMethods {
+// test-export
+export enum RequestMethods {
   Methods(List<Method>),
   All
 }
@@ -1210,7 +1211,8 @@ let getQueryMap = () => {
     Err(err) => failWithMsgWithErr("Unable to read system arguments", err)
   }
 }
-    
+
+// TODO allow escaping of <
 // a bit of a hack to not capture regex groups specified in route.
 // if something is going wrong with matching patterns it may be due to this
 let captureGroupRegex = Result.unwrap(Regex.make("(?<!\\\\)\\((?!\\?)"))
@@ -1220,15 +1222,16 @@ let customParamRegex = Result.unwrap(Regex.make("<\\w+\\((.+?)\\)>"))
 let paramNameRegex = Result.unwrap(Regex.make("<(\\w+)>"))
 let customParamNameRegex = Result.unwrap(Regex.make("<(\\w+)\\(.+?\\)>"))
 // lookbehind to prevent single slash character from being matched
-let slashAtEndRegex = Result.unwrap(Regex.make("(?<=.)/$"))
+// let slashAtEndRegex = Result.unwrap(Regex.make("(?<=.)/$"))
+let slashAtEndRegex = Result.unwrap(Regex.make("/$"))
 
-// TODO remove export
-export let preprocessRouteRegex = route => {
-  List.reduce(
+// test-export
+export let preprocessRouteSegmentRegex = routeSegment => {
+  let preprocessed = List.reduce(
     (str, (regex, replaceWith)) => {
       Regex.replaceAll(regex, str, replaceWith)
     },
-    route,
+    routeSegment,
     [
       (captureGroupRegex, "(?:"),
       (replaceWithCapturesRegex, "($1)"),
@@ -1237,106 +1240,111 @@ export let preprocessRouteRegex = route => {
       (slashAtEndRegex, ""),
     ]
   )
+  // should probably replace with regex once
+  // https://github.com/grain-lang/grain/issues/1431 is fixed
+  (if (!String.startsWith("/", preprocessed)) "/" else "") ++ preprocessed
 }
 
 enum RouteMatchStatus {
   RouteNotFound,
   MethodNotSupported(List<Method>),
-  RouteFound(RequestHandler)
+  RouteFound(RequestHandler, Map.Map<String, String>)
 }
 
 // use a "precedence" value to keep track of best route found e.g. to
 // make a route with wrong method override one not found at all
-let routeMatchPrecedence = rms => {
-  match (rms) {
+let isBetterRouteMatch = (firstRms, secondRms) => {
+  let precedence = rms => match (rms) {
     RouteNotFound => 1,
     MethodNotSupported(_) => 2,
-    RouteFound(_) => 3
+    RouteFound(_, _) => 3
+  }
+  precedence(firstRms) > precedence(secondRms)
+}
+
+let getPathParamNames = routePath => {
+  let paramNameRegexes = List.append(
+    Regex.findAll(paramNameRegex, routePath),
+    Regex.findAll(customParamNameRegex, routePath)
+  )
+  let paramNames = List.map(
+    (matchRes: Regex.MatchResult) => Option.unwrap(matchRes.group(1)),
+    paramNameRegexes
+  )
+  paramNames
+}
+
+// test-export
+export let rec allReqHandlers = route => {
+  let pathParamNames = getPathParamNames(route.path)
+  let path = preprocessRouteSegmentRegex(route.path)
+  match (route.routeHandler) {
+    Endpoint(handlerMethods, reqHandler) => {
+      [(path, pathParamNames, handlerMethods, reqHandler)]
+    },
+    Scope(middleware, routes) => {
+      List.flatMap(subRoute => {
+        List.map(((subPath, subPathParamNames, handlerMethods, reqHandler)) => {
+          let basePath = if (path == "/") "" else path
+          (
+            basePath ++ subPath,
+            List.append(pathParamNames, subPathParamNames),
+            handlerMethods,
+            middleware(reqHandler)
+          )
+        }, allReqHandlers(subRoute))
+      }, routes)
+    }
   }
 }
 
-// TODO comment out export
-export let findReqHandler = (reqMethod, path, route) => {
-  let pathVars = Map.make()
+// test-export
+export let findReqHandler = (reqMethod, reqPath, route) => {
+  let reqPath = if (reqPath != "/") Regex.replace(slashAtEndRegex, reqPath, "") else "/"
 
-  let path = Regex.replace(slashAtEndRegex, path, "")
-  let rootHandler = rms => (middlewares([]), rms)
+  let handlers = allReqHandlers(route)
 
-  // performs breadth-first-search to find suitable request
-  // handler for the given path and method.
-  let rec findReqHandlerHelper = (pathSegment, route) => {
-    let paramNames = List.map(
-      (matchRes: Regex.MatchResult) => Option.unwrap(matchRes.group(1)),
-      List.append(
-        Regex.findAll(paramNameRegex, route.path),
-        Regex.findAll(customParamNameRegex, route.path)
+  let bestMatch = List.reduce(
+    (bestMatch, (routePath, paramNames, handlerMethods, reqHandler)) => {
+      let routeRegex = Result.expect(
+        "Invalid route path regular expression " ++ routePath,
+        Regex.make("^" ++ routePath ++ "$")
       )
-    )
-
-    let isTerminal = match (route.routeHandler) {
-      Endpoint(_, _) => true,
-      _ => false,
-    }
-
-    let preprocessed = "^" ++ preprocessRouteRegex(route.path) ++ if (isTerminal) "$" else ""
-    let routeRegex = match (Regex.make(preprocessed)) {
-      Err(_) => failWithMsg("Invalid route path " ++ route.path),
-      Ok(routeRegex) => routeRegex
-    }
-    match (Regex.find(routeRegex, pathSegment)) {
-      None => rootHandler(RouteNotFound),
-      Some(pathMatch) => {
-        let (_, thisPathEndI) = Option.unwrap(pathMatch.groupPosition(0))
-        let matchedSegment = Option.unwrap(pathMatch.group(0))
-        // capture groups being matched means we have found path parameter values
-        if (pathMatch.numGroups > 1) {
-          let [_, ...paramVals] = Array.toList(Array.map(grp => Option.unwrap(grp), pathMatch.allGroups()))
-          List.forEach(((paramName, paramVal)) => {
-            Map.set(paramName, paramVal, pathVars)
-          }, List.zip(paramNames, paramVals))
-        }
-        let reqHandler = match (route.routeHandler) {
-          Endpoint(handlerMethods, reqHandler) => {
-            rootHandler(match (handlerMethods) {
-              Methods(methods) when !List.contains(reqMethod, methods) => MethodNotSupported(methods),
-              _ => RouteFound(reqHandler)
-            })
-          },
-          Scope(middleware, routeHandlers) => {
-            let nextPathSegment = String.slice(thisPathEndI, String.length(pathSegment), pathSegment)
-            let nextPathSegment = if (!String.startsWith("/", nextPathSegment)) "/" ++ nextPathSegment else nextPathSegment
-            let (bestMatchMw, bestMatchRms) = List.reduce(
-              (best, routeHandler) => {
-                let this = findReqHandlerHelper(nextPathSegment, routeHandler)
-                let (bestMw, bestRms) = best
-                let (_, thisRms) = this
-                match ((bestRms, thisRms)) {
-                  (MethodNotSupported(bestMethods), MethodNotSupported(thisMethods)) => {
-                    (bestMw, MethodNotSupported(List.unique(List.append(bestMethods, thisMethods))))
-                  },
-                  // overwrite matched route handler if it is better than
-                  // the best one found so far
-                  _ when routeMatchPrecedence(thisRms) > routeMatchPrecedence(bestRms) => this,
-                  _ => best,
-                }
-              },
-              rootHandler(RouteNotFound),
-              routeHandlers
-            )
-            (middlewares([middleware, bestMatchMw]), bestMatchRms)
+      let thisMatch = match (Regex.find(routeRegex, reqPath)) {
+        None => RouteNotFound,
+        Some(pathMatch) => {
+          match (handlerMethods) {
+            Methods(methods) when !List.contains(reqMethod, methods) => MethodNotSupported(methods),
+            _ => {
+              let [_, ...paramVals] = Array.toList(
+                Array.map(Option.unwrap, pathMatch.allGroups())
+              )
+              let pathParams = Map.fromList(List.zip(paramNames, paramVals))
+              RouteFound(reqHandler, pathParams)
+            }
           }
         }
-        reqHandler
       }
-    }
+      match ((bestMatch, thisMatch)) {
+        (MethodNotSupported(bestMethods), MethodNotSupported(thisMethods)) => {
+          MethodNotSupported(List.unique(List.append(bestMethods, thisMethods)))
+        },
+        // overwrite matched route handler if it is better than
+        // the best one found so far
+        _ when isBetterRouteMatch(thisMatch, bestMatch) => thisMatch,
+        _ => bestMatch,
+      }
+    },
+    RouteNotFound,
+    handlers
+  )
+
+  let (reqHandler, pathParams) = match (bestMatch) {
+    RouteNotFound => (req => notFound, Map.make()),
+    MethodNotSupported(supported) => (req => methodNotSupported(supported), Map.make()),
+    RouteFound(reqHandler, pathParams) => (reqHandler, pathParams)
   }
-  let (middleware, routeMatchStatus) = findReqHandlerHelper(path, route)
-  let reqHandler = match (routeMatchStatus) {
-    RouteNotFound => req => notFound,
-    MethodNotSupported(supported) => req => methodNotSupported(supported),
-    RouteFound(reqHandler) => reqHandler
-  }
-  (middleware(reqHandler), pathVars)
+  (reqHandler, pathParams)
 }
 
 /**
