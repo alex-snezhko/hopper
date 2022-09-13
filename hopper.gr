@@ -44,8 +44,8 @@ export enum Method {
  * Represents either a single value or multiple values.
  */
 export enum OneOrMany<a> {
-  SingleVal(a),
-  MultiVal(List<a>)
+  Val(a),
+  Vals(List<a>)
 }
 
 // underscore prefix to discourage direct record field access
@@ -600,21 +600,11 @@ export let newStatus = (status: Status, res: Response) => {
   response(status, _headers, _body)
 }
 
-let notFound = response(NotFound, Map.fromList([("Content-Type", "text/plain")]), "Requested URL not found")
-let methodNotSupported = supportedMethods => {
-  let allowed = List.join(", ", List.map(methodToString, supportedMethods))
-  response(
-    MethodNotAllowed,
-    Map.fromList([("Content-Type", "text/plain"), ("Allow", allowed)]),
-    "Method not allowed for this URL"
-  )
-}
-
 /**
  * Creates a new `Response` from a static file on the server at the given path.
  * 
  * @param filePath: The path of the file to search for on the server
- * @returns A new OK `Response` if the file is found, or a "Not Found" reponse otherwise
+ * @returns A new "OK" `Response` if the file is found, or a "Not Found" reponse otherwise
  */
 export let file = filePath => {
   let result = File.pathOpen(File.pwdfd, [], filePath, [], [File.FdFilestats, File.FdRead], [], [])
@@ -1029,161 +1019,6 @@ export let variable = (key, msg) => {
   }: Variable<a>
 }
 
-let parseUrlEncoded = parts => {
-  List.map(part => {
-    match (String.indexOf("=", part)) {
-      // some parts may only have a key, set value to empty string in this case
-      None => (part, ""),
-      Some(i) => {
-        let name = String.slice(0, i, part)
-        let val = String.slice(i + 1, String.length(part), part)
-        (name, val)
-      }
-    }
-  }, parts)
-}
-
-let combineToMapSharedKeys = list => {
-  let valMap = Map.make()
-  List.forEach(((key, val)) => {
-    match (Map.get(key, valMap)) {
-      None => Map.set(key, SingleVal(val), valMap),
-      Some(SingleVal(currVal)) => Map.set(key, MultiVal([currVal, val]), valMap),
-      Some(MultiVal(currVals)) => Map.set(key, MultiVal(List.append(currVals, [val])), valMap)
-    }
-  }, list)
-  valMap
-}
-
-/**
- * Parses an HTTP request body with URL-encoded form data into a `Map` mapping
- * form item names to their values. The keys/values are expected to be
- * URL-encoded with `Content-Type: x-www-form-urlencoded`
- * 
- * @param req: The incoming `Request`
- * @returns A `Map` mapping form item names to their values
- */
-export let urlencodedFormBody = req => {
-  match (header("Content-Type", req)) {
-    Some(t) when String.startsWith("application/x-www-form-urlencoded", t) => {
-      let parts = Array.toList(String.split("&", req._body))
-      let urlEncodedItems = parseUrlEncoded(parts)
-      Ok(combineToMapSharedKeys(urlEncodedItems))
-    },
-    _ => Err(ContentTypeNotAllowed)
-  }
-}
-
-let partContentDisposition = headers => {
-  let regex = Result.unwrap(Regex.make("^content-disposition:\\s*form-data;"))
-  let contentDispositionLine = List.find(
-    line => Regex.isMatch(regex, toLower(line)),
-    headers
-  )
-  match (contentDispositionLine) {
-    None => Err(InvalidFormData("Part missing Content-Disposition: form-data header")),
-    Some(contentDispositionLine) => {
-      // TODO can make more robust in the future
-      let nameRegex = Result.unwrap(Regex.make("name=\"([^\"]+)\""))
-      let filenameRegex = Result.unwrap(Regex.make("filename=\"([^\"]+)\""))
-      match (Regex.find(nameRegex, contentDispositionLine)) {
-        None => Err(InvalidFormData("Part missing name in Content-Disposition header")),
-        Some(reMatch) => {
-          let name = Option.unwrap(reMatch.group(1))
-          let filename = Option.map(
-            (reMatch: Regex.MatchResult) => Option.unwrap(reMatch.group(1)),
-            Regex.find(filenameRegex, contentDispositionLine)
-          )
-          Ok((name, filename))
-        }
-      }
-    }
-  }
-}
-
-let partContentType = (headers, filename) => {
-  let contentTypeLine = List.find(
-    line => String.startsWith("content-type:", toLower(line)),
-    headers
-  )
-  match (contentTypeLine) {
-    Some(line) => String.trim(String.slice(String.length("content-type:"), String.length(line), line)),
-    None => guessMimeType(filename)
-  }
-}
-
-let readMultipart = (body, boundary) => {
-  let lines = Array.toList(String.split("\n", body))
-  // first line will be boundary
-  let [_, ...lines] = lines
-  let lines = List.takeWhile(line => line != "--" ++ boundary ++ "--", lines)
-  let parts = List.reduceRight(
-    (line, parts) => {
-      if (line == "--" ++ boundary) {
-        [[], ...parts]
-      } else {
-        let [partLines, ...rest] = parts
-        [[line, ...partLines], ...rest]
-      }
-    },
-    [[]],
-    lines
-  )
-  let multipartNameVals = List.reduceRight(
-    (partLines, multipartNameVals) => {
-      match (multipartNameVals) {
-        Err(err) => Err(err),
-        Ok(multipartNameVals) => {
-          let lineEmpty = line => String.trim(line) == ""
-          let headers = List.takeWhile(line => !lineEmpty(line), partLines)
-
-          match (partContentDisposition(headers)) {
-            Err(err) => Err(err),
-            Ok((name, filename)) => {
-              let body = List.dropWhile(lineEmpty, List.dropWhile(line => !lineEmpty(line), partLines))
-              let bodyStr = List.join("\n", body)
-              let val = match (filename) {
-                Some(filename) => {
-                  let contentType = partContentType(headers, filename)
-                  FilePart({ filename, contentType, content: bodyStr })
-                },
-                None => TextPart(bodyStr)
-              }
-              Ok([(name, val), ...multipartNameVals])
-            }
-          }
-        }
-      }
-    },
-    Ok([]),
-    parts
-  )
-  Result.map(combineToMapSharedKeys, multipartNameVals)
-}
-
-/**
- * Parses an HTTP request body with multipart form data into a `Map` mapping
- * form item names to their values. The request should have
- * `Content-Type: multipart/form-data`
- * 
- * @param req: The incoming `Request`
- * @returns A `Map` mapping form item names to their values
- */
-export let multipartFormBody = req => {
-  match (header("Content-Type", req)) {
-    Some(val) when String.startsWith("multipart/form-data;", val) => {
-      let boundary = String.trim(String.slice(String.length("multipart/form-data;"), String.length(val), val))
-      if (String.startsWith("boundary=", boundary)) {
-        let boundaryVal = String.slice(String.length("boundary="), String.length(boundary), boundary)
-        readMultipart(req._body, boundaryVal)
-      } else {
-        Err(InvalidFormData("Form data missing boundary"))
-      }
-    },
-    _ => Err(ContentTypeNotAllowed)
-  }
-}
-
 let getBody = wagiEnv => {
   let bodyLengthStr = match (Map.get("CONTENT_LENGTH", wagiEnv)) {
     Some(val) => val,
@@ -1201,12 +1036,121 @@ let getBody = wagiEnv => {
   }
 }
 
+export let splitOneOrManyMap = map => {
+  let vals = List.flatMap(((key, val)) => {
+    match (val) {
+      Val(val) => [(key, val)],
+      Vals(vals) => List.map(val => (key, val), vals)
+    }
+  }, Map.toList(map))
+  List.sort(compare, vals)
+}
+
+export let joinOneOrManyMap = list => {
+  let valMap = Map.make()
+  List.forEach(((key, val)) => {
+    match (Map.get(key, valMap)) {
+      None => Map.set(key, Val(val), valMap),
+      Some(Val(currVal)) => Map.set(key, Vals([currVal, val]), valMap),
+      Some(Vals(currVals)) => Map.set(key, Vals(List.append(currVals, [val])), valMap)
+    }
+  }, list)
+  valMap
+}
+
+let replacePatternsWith = (str, re, replace) => {
+  let strLen = String.length(str)
+  let matchPositions = List.map(
+    (reMatch: Regex.MatchResult) => Option.unwrap(reMatch.groupPosition(0)),
+    Regex.findAll(re, str)
+  )
+  let parts = List.zipWith(
+    ((_, prevEnd), (currBegin, currEnd)) => {
+      let before = String.slice(prevEnd, currBegin, str)
+      let matched = String.slice(currBegin, currEnd, str)
+      before ++ if (matched != "") replace(matched) else ""
+    },
+    [(0, 0), ...matchPositions],
+    List.append(matchPositions, [(strLen, strLen)])
+  )
+  List.join("", parts)
+}
+
+let toHexString = num => {
+  match (num) {
+    10 => "A",
+    11 => "B",
+    12 => "C",
+    13 => "D",
+    14 => "E",
+    15 => "F",
+    _ => toString(num)
+  }
+}
+
+// export let cleanPath = path => {
+//   let parts = String.split("/", path)
+//   // TODO remove previous on ..
+//   let goodParts = Array.filter(part => {
+//     part != "." && part != ".." && part != ""
+//   }, parts)
+//   "/" ++ Array.join("/", goodParts)
+// }
+
+let toEncodeRegex = Result.unwrap(Regex.make("[:/?#\\[\\]@!$&'()*+,;=%]"))
+export let percentEncode = str => {
+  replacePatternsWith(str, toEncodeRegex, c => {
+    let code = String.charCodeAt(0, c)
+    let firstHex = code >> 4
+    let secondHex = code % 16
+    "%" ++ toString(firstHex) ++ toHexString(secondHex)
+  })
+}
+
+let pctEncodedRegex = Result.unwrap(Regex.make("%[0-9A-Fa-f]{2}"))
+export let percentDecode = str => {
+  replacePatternsWith(str, pctEncodedRegex, pctEncoding => {
+    // truncate percent
+    let hex = String.slice(1, 3, pctEncoding)
+    let code = Result.unwrap(Number.parseInt(hex, 16))
+    Char.toString(Char.fromCode(code))
+  })
+}
+
+// TODO include clean URL here
+export let urlEncode = urlVals => {
+  let list = splitOneOrManyMap(urlVals)
+  let parts = List.map(((key, val)) => {
+    percentEncode(key) ++ "=" ++ percentEncode(val)
+  }, list)
+  List.join("&", parts)
+}
+
+let urlDecodeParts = parts => {
+  let partKeyVals = List.map(part => {
+    match (String.indexOf("=", part)) {
+      // some parts may only have a key, set value to empty string in this case
+      None => (part, ""),
+      Some(i) => {
+        let name = String.slice(0, i, part)
+        let val = String.slice(i + 1, String.length(part), part)
+        (percentDecode(name), percentDecode(val))
+      }
+    }
+  }, parts)
+  joinOneOrManyMap(partKeyVals)
+}
+
+export let urlDecode = str => {
+  let parts = Array.toList(String.split("&", str))
+  urlDecodeParts(parts)
+}
+
 let getQueryMap = () => {
   match (Process.argv()) {
     Ok(args) => {
       let [_, ...queryParamList] = Array.toList(args)
-      let urlEncodedItems = parseUrlEncoded(queryParamList)
-      combineToMapSharedKeys(urlEncodedItems)
+      urlDecodeParts(queryParamList)
     },
     Err(err) => failWithMsgWithErr("Unable to read system arguments", err)
   }
@@ -1245,19 +1189,28 @@ export let preprocessRouteSegmentRegex = routeSegment => {
   (if (!String.startsWith("/", preprocessed)) "/" else "") ++ preprocessed
 }
 
-enum RouteMatchStatus {
-  RouteNotFound,
+enum RouteMatchType {
+  ExactMatch,
+  BaseRouteFound,
   MethodNotSupported(List<Method>),
-  RouteFound(RequestHandler, Map.Map<String, String>)
+}
+
+enum RouteMatchStatus {
+  NoMatch,
+  Match(RequestHandler, Map.Map<String, String>, RouteMatchType),
+  // ExactMatch(RequestHandler, Map.Map<String, String>)
 }
 
 // use a "precedence" value to keep track of best route found e.g. to
 // make a route with wrong method override one not found at all
 let isBetterRouteMatch = (firstRms, secondRms) => {
   let precedence = rms => match (rms) {
-    RouteNotFound => 1,
-    MethodNotSupported(_) => 2,
-    RouteFound(_, _) => 3
+    NoMatch => 1,
+    Match(_, _, t) => match (t) {
+      BaseRouteFound => 2,
+      MethodNotSupported(_) => 3,
+      ExactMatch => 4,
+    }
   }
   precedence(firstRms) > precedence(secondRms)
 }
@@ -1274,60 +1227,85 @@ let getPathParamNames = routePath => {
   paramNames
 }
 
+// full: an actual route path
+// base: used to indicate that this is part of a scope
+enum RouteType {
+  Full(RequestMethods),
+  Base,
+}
+
 // test-export
-export let rec allReqHandlers = route => {
+export let rec allReqHandlers = (route, notFoundHandler) => {
   let pathParamNames = getPathParamNames(route.path)
   let path = preprocessRouteSegmentRegex(route.path)
   match (route.routeHandler) {
     Endpoint(handlerMethods, reqHandler) => {
-      [(path, pathParamNames, handlerMethods, reqHandler)]
+      [(path, pathParamNames, Full(handlerMethods), reqHandler)]
     },
     Scope(middleware, routes) => {
       List.flatMap(subRoute => {
-        List.map(((subPath, subPathParamNames, handlerMethods, reqHandler)) => {
+        let baseHandlerInfo = (
+          path ++ ".*",
+          pathParamNames,
+          Base,
+          middleware(notFoundHandler)
+        )
+        [baseHandlerInfo, ...List.map(((subPath, subPathParamNames, routeType, reqHandler)) => {
           let basePath = if (path == "/") "" else path
           (
             basePath ++ subPath,
             List.append(pathParamNames, subPathParamNames),
-            handlerMethods,
-            middleware(reqHandler)
+            routeType,
+            middleware(reqHandler),
           )
-        }, allReqHandlers(subRoute))
+        }, allReqHandlers(subRoute, notFoundHandler))]
       }, routes)
     }
   }
 }
 
 // test-export
-export let findReqHandler = (reqMethod, reqPath, route) => {
+export let findReqHandler = (reqMethod, reqPath, route, notFoundHandler, mnaHandler) => {
   let reqPath = if (reqPath != "/") Regex.replace(slashAtEndRegex, reqPath, "") else "/"
 
-  let handlers = allReqHandlers(route)
+  let handlers = allReqHandlers(route, notFoundHandler)
+  log(handlers)
 
   let bestMatch = List.reduce(
-    (bestMatch, (routePath, paramNames, handlerMethods, reqHandler)) => {
+    (bestMatch, (routePath, paramNames, routeType, reqHandler)) => {
       let routeRegex = Result.expect(
         "Invalid route path regular expression " ++ routePath,
         Regex.make("^" ++ routePath ++ "$")
       )
       let thisMatch = match (Regex.find(routeRegex, reqPath)) {
-        None => RouteNotFound,
+        None => NoMatch,
         Some(pathMatch) => {
-          match (handlerMethods) {
-            Methods(methods) when !List.contains(reqMethod, methods) => MethodNotSupported(methods),
-            _ => {
-              let [_, ...paramVals] = Array.toList(
-                Array.map(Option.unwrap, pathMatch.allGroups())
-              )
-              let pathParams = Map.fromList(List.zip(paramNames, paramVals))
-              RouteFound(reqHandler, pathParams)
+          let [_, ...paramVals] = Array.toList(
+            Array.map(Option.unwrap, pathMatch.allGroups())
+          )
+          let pathParams = Map.fromList(List.zip(paramNames, paramVals))
+
+          match (routeType) {
+            Base => Match(reqHandler, pathParams, BaseRouteFound),
+            Full(handlerMethods) => match (handlerMethods) {
+              Methods(methods) when !List.contains(reqMethod, methods) => Match(
+                mnaHandler(methods),
+                pathParams,
+                MethodNotSupported(methods)
+              ),
+              _ => Match(reqHandler, pathParams, ExactMatch)
             }
           }
         }
       }
       match ((bestMatch, thisMatch)) {
-        (MethodNotSupported(bestMethods), MethodNotSupported(thisMethods)) => {
-          MethodNotSupported(List.unique(List.append(bestMethods, thisMethods)))
+        // use the first match's path params for MethodNotAllowed
+        (
+          Match(_, pathParams, MethodNotSupported(bestMethods)),
+          Match(_, _, MethodNotSupported(thisMethods))
+        ) => {
+          let methods = List.unique(List.append(bestMethods, thisMethods))
+          Match(mnaHandler(methods), pathParams, MethodNotSupported(methods))
         },
         // overwrite matched route handler if it is better than
         // the best one found so far
@@ -1335,16 +1313,60 @@ export let findReqHandler = (reqMethod, reqPath, route) => {
         _ => bestMatch,
       }
     },
-    RouteNotFound,
+    NoMatch,
     handlers
   )
 
   let (reqHandler, pathParams) = match (bestMatch) {
-    RouteNotFound => (req => notFound, Map.make()),
-    MethodNotSupported(supported) => (req => methodNotSupported(supported), Map.make()),
-    RouteFound(reqHandler, pathParams) => (reqHandler, pathParams)
+    NoMatch => (notFoundHandler, Map.make()),
+    Match(reqHandler, pathParams, _) => (reqHandler, pathParams),
   }
   (reqHandler, pathParams)
+}
+
+export enum ServerSetting {
+  NotFoundHandler(RequestHandler),
+  MethodNotSupportedHandler(List<Method> -> RequestHandler),
+  GlobalMiddleware(Middleware)
+}
+
+let getSettings = settingsList => {
+  let notFoundHandler = Option.mapWithDefault(
+    opt => match (opt) { NotFoundHandler(handler) => handler, _ => fail "" },
+    req => response(
+      NotFound,
+      Map.fromList([("Content-Type", "text/plain")]),
+      "Requested URL not found"
+    ),
+    List.find(opt => match (opt) {
+      NotFoundHandler(_) => true, _ => false
+    }, settingsList)
+  )
+
+  let mnaHandler = Option.mapWithDefault(
+    opt => match (opt) { MethodNotSupportedHandler(handler) => handler, _ => fail "" },
+    allowed => req => {
+      let allow = List.join(", ", List.map(methodToString, allowed))
+      response(
+        MethodNotAllowed,
+        Map.fromList([("Content-Type", "text/plain"), ("Allow", allow)]),
+        "Method not allowed for this URL"
+      )
+    },
+    List.find(opt => match (opt) {
+      MethodNotSupportedHandler(_) => true, _ => false
+    }, settingsList)
+  )
+
+  let rootMiddleware = Option.mapWithDefault(
+    opt => match (opt) { GlobalMiddleware(middleware) => middleware, _ => fail "" },
+    next => req => next(req),
+    List.find(opt => match (opt) {
+      GlobalMiddleware(_) => true, _ => false
+    }, settingsList)
+  )
+
+  (notFoundHandler, mnaHandler, rootMiddleware)
 }
 
 /**
@@ -1354,11 +1376,20 @@ export let findReqHandler = (reqMethod, reqPath, route) => {
  * @param middleware: The middleware to use globally for the server
  * @param routes: The root routes for the server
  */
-export let serveWithMiddleware = (middleware, routes) => {
+export let serveWithSettings = (settings, routes) => {
+  let (notFoundHandler, mnaHandler, rootMiddleware) = getSettings(settings)
+
   let wagiEnv = getWagiEnv()
 
-  let rootRoute = scopeWithMiddleware("/", middleware, routes)
-  let (reqHandler, params) = findReqHandler(getReqMethod(wagiEnv), getPath(wagiEnv), rootRoute)
+  let rootRoute = scopeWithMiddleware("/", rootMiddleware, routes)
+  let (reqHandler, params) = findReqHandler(
+    getReqMethod(wagiEnv),
+    getPath(wagiEnv),
+    rootRoute,
+    notFoundHandler,
+    mnaHandler,
+  )
+
   let request = {
     _message: {
       _wagiEnv: wagiEnv,
@@ -1379,5 +1410,5 @@ export let serveWithMiddleware = (middleware, routes) => {
  * @param routes: The root routes for the server
  */
 export let serve = routes => {
-  serveWithMiddleware(identity, routes)
+  serveWithSettings([], routes)
 }

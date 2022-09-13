@@ -1,0 +1,32 @@
+import Map from "map"
+import * from "./grain-test"
+import Hopper from "../hopper"
+
+testMultiple("joining/splitting OneOrMany map", [
+  ([("one", Hopper.Val("val")), ("two", Hopper.Vals(["a", "b"]))], [("one", "val"), ("two", "a"), ("two", "b")]),
+  ([("three", Hopper.Vals(["a", "b", "c"]))], [("three", "a"), ("three", "b"), ("three", "c")]),
+  ([], []),
+], ((mapElems, list)) => {
+  let map = Map.fromList(mapElems)
+  assertThat(Hopper.splitOneOrManyMap(map), equals(list))
+  assertThat(Hopper.joinOneOrManyMap(list), equals(map))
+})
+
+testMultiple("percent encoding/decoding", [
+  ("as%2Fdf", "as/df"),
+  ("%3A%2F%3F%23%5B%5D%40%21%24%26%27%28%29%2A%2B%2C%3B%3D%25", ":/?#[]@!$&'()*+,;=%"),
+  ("abcd", "abcd"),
+  ("", ""),
+], ((encoded, decoded)) => {
+  assertThat(Hopper.percentDecode(encoded), equals(decoded))
+  assertThat(Hopper.percentEncode(decoded), equals(encoded))
+})
+
+testMultiple("url encoding/decoding", [
+  ("as%2Fdf=a%26b&as%2Fdf=cd&single=val", [("as/df", Hopper.Vals(["a&b", "cd"])), ("single", Hopper.Val("val"))]),
+  ("a=b", [("a", Hopper.Val("b"))]),
+  ("asdf=", [("asdf", Hopper.Val(""))]),
+], ((encoded, decoded)) => {
+  assertThat(Hopper.urlDecode(encoded), equals(Map.fromList(decoded)))
+  assertThat(Hopper.urlEncode(Map.fromList(decoded)), equals(encoded))
+})

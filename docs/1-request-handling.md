@@ -50,7 +50,7 @@ This server will actually always respond with `This is request number 1` since a
 ## Relevant API Portions
 
 ### Bodies
-The bodies of requests and responses are accessible as strings via `Hopper.body`. Hopper also includes some built-in body parsing functions, including parsing url-encoded or multipart forms. More on this in the [forms guide](x-html-forms.md).
+The bodies of requests and responses are accessible as strings via `Hopper.body`.
 
 ### Headers
 HTTP headers of requests and responses are accessible via `Hopper.header`, case insensitive (or `Hopper.headers` to get all of the headers in a `Map`, lowercasing the names for normalization).
@@ -71,6 +71,7 @@ Hopper.text("Hello there") // response with Content-Type: text/plain
 Hopper.json("{\"name\": \"val\"}") // response with Content-Type: application/json
 Hopper.contentType("text/html", "<body><p>I am HTML</p></body>")
 Hopper.newStatus(Hopper.BadRequest, Hopper.text("Whoops")) // response with content of text response but 400 status
+Hopper.file("asdf.txt") // response with file contents as the body (file should be in the configured WAGI volume)
 
 // the following can be used to create redirection responses
 
