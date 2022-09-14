@@ -57,8 +57,8 @@ Hopper.serve([
   ])
 ])
 
-// middlewares can also be applied "globally"
-Hopper.serveWithMiddleware(withLogging, [
+// middlewares can also be applied "globally" to all routes
+Hopper.serveWithSettings([Hopper.GlobalMiddleware(withLogging)], [
   // ...
 ])
 ```

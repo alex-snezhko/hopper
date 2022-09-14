@@ -89,6 +89,23 @@ Routes can be defined for single request methods or multiple request methods. `H
 Path parameters can be fetched with `Hopper.param`. It is assumed that a path parameter with the given name was actually on the route matcher or a parent scope, otherwise an exception will be thrown.
 
 ### Serving and Scopes
-`Hopper.scope` and `Hopper.scopeWithMiddleware` (more on middleware in the next guide) can be used to define scopes. `Hopper.serve` and `Hopper.serveWithMiddleware` can be thought of as "root" scopes mounted at `/` with additional logic for core services like parsing requests.
+`Hopper.scope` and `Hopper.scopeWithSettings` can be used to define scopes, with special application-wide settings set if desired. These functions can be thought of as having their own "root" scopes mounted at `/` with additional logic for core services like parsing requests.
+```
+Hopper.scope(...) // uses default settings
+Hopper.scopeWithOptions([
+  // to define a custom handler to run when a request URL does not match any routes
+  // (it is recommended that this handler return a Hopper.NotFound status)
+  Hopper.NotFoundHandler(req => ...),
+
+  // to define a custom handler to run when a request URL matches a route
+  // but not any of the methods defined for the route
+  // (it is recommended that this handler return a Hopper.MethodNotAllowed status
+  // and set an "Allow" header with the allowed methods)
+  Hopper.MethodNotAllowedHandler((allowedMethods, req) => ...)
+
+  // to define a global middleware to be applied to all routes
+  Hopper.GlobalMiddleware(...)
+], ...)
+```
 
 Next guide: [Middleware](3-middleware.md)
