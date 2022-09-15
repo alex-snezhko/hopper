@@ -58,13 +58,13 @@ Hopper.serve([
 ])
 
 // middlewares can also be applied "globally" to all routes
-Hopper.serveWithSettings([Hopper.GlobalMiddleware(withLogging)], [
+Hopper.serveWithMiddleware(withLogging, [
   // ...
 ])
 ```
 
 ## Variables
-Both requests and responses have the capability to contain "variables", primarily for use by middlewares to pass arbitrary data down to their child handlers or vice versa; this is very powerful mechanism for extending Hopper, as it can enable a great degree of abstraction for request handlers.
+Both requests and responses have the capability to contain "variables", primarily for use by middlewares to pass arbitrary data down to their child handlers or vice versa. This is a useful mechanism for extending Hopper, as it can enable additional degrees of abstraction for request handlers.
 
 For example, let's say we have built a library for parsing strings into XML objects, and we want our request handlers to handle XML data. Rather than including all of the parsing logic in each request handler, we can have middleware pass down the XML-parsed data to our handlers.
 ```
@@ -77,17 +77,23 @@ let withXmlParsing = next => req => {
   next(req)
 }
 
-let getXml = req => {
-  let xml: Hopper.Variable<Xml> = Hopper.variable("xmlBody", req)
-  xml
+let xml = req => {
+  let xmlVal: Hopper.Variable<Xml> = Hopper.variable("xmlBody", req)
+  match (xmlVal) {
+    Ok(val) => val,
+    Err(Hopper.NotSet) => fail "should be called from xml parsing middleware",
+    Err(Hopper.DeserializationError(err)) => fail "failed to deserialize variable value"
+  }
 }
 
 Hopper.serve([
   Hopper.post("/submitXml", withXmlParsing(req => {
-    let xml = getXml(req)
+    let xmlVal = xml(req)
     // we can now work with the XML data directly
     // ...
   }))
 ])
 ```
 Variables internally use Grain's `Marshal` standard library module to be serialized and deserialized, and thus may be of any type (meaning `Hopper.variable` does not guarantee type-safety). It is recommended to explicitly type variable accesses with `Hopper.Variable<a>`, ensuring that they are the same type as the values set.
+
+Now that you understand request handling, routing, and the middleware system, you should be equipped to write some HTTP servers with Hopper! Make sure to reference the [API docs](/api-docs.md) to get a sense for the portions of Hopper not covered by this guide.

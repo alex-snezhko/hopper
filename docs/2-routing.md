@@ -2,6 +2,7 @@
 Hopper's routing system works by attaching route paths to each request handler; upon each incoming request, Hopper attempts to find the best match for the request based on its URL and HTTP method. For requests where no match is found:
 - If no handler is found for the request's URL, a request handler always responding with `404 Not Found` response will be used instead.
 - If the URL matches a path on the server but the request method is incorrect (e.g. if for `/resource` a GET and POST handler are defined but a `PUT /resource` request is received), a request handler always responding with `405 Method Not Allowed` will be used instead.
+
 `Hopper.serve` is a function taking various route mappers, and can be thought of as the root of the server in which the given routes are nested. `Hopper.get` is an example of a route mapper for mapping `GET` requests to a request handler.
 ```
 Hopper.serve([
@@ -70,13 +71,13 @@ Hopper.serve([
   ])
 ])
 ```
-Now `GET /best/resource` and `GET /best/band` are valid routes. The path string values given for scopes abide by the same matching rules as terminal matchers like `Hopper.get`. Additionally, regex matching for scopes is "lazy"; for example, with the scope:
+Now `GET /best/resource` and `GET /best/band` are valid routes. The path string values given for scopes abide by the same matching rules as terminal matchers like `Hopper.get`. Additionally, regex matching for scopes is "greedy"; for example, with the scope:
 ```
 Hopper.scope("/.*", [
   Hopper.get("/end", ...)
 ])
 ```
-`GET /some-stuff/end` will match to the `Hopper.get("/end", ...)` request handler, meaning the `/.*` only consumed `/some-stuff` rather than the whole path in this case.
+`GET /some-stuff/end` would not match to the `Hopper.get("/end", ...)` request handler, since the `/.*` in the scope would consume the whole path.
 
 ## Relevant API Portions
 
@@ -88,11 +89,12 @@ Routes can be defined for single request methods or multiple request methods. `H
 ### Path parameters
 Path parameters can be fetched with `Hopper.param`. It is assumed that a path parameter with the given name was actually on the route matcher or a parent scope, otherwise an exception will be thrown.
 
-### Serving and Scopes
-`Hopper.scope` and `Hopper.scopeWithSettings` can be used to define scopes, with special application-wide settings set if desired. These functions can be thought of as having their own "root" scopes mounted at `/` with additional logic for core services like parsing requests.
+### Serving
+`Hopper.serve` has several variations (`Hopper.serveWith[...]`), which can be used to apply special application-wide settings/middleware if desired. In addition to housing logic for core services like parsing requests, the `serve[...]` functions can also be thought of as owning their own scopes mounted at `/`.
 ```
-Hopper.scope(...) // uses default settings
-Hopper.scopeWithOptions([
+Hopper.serve(...) // uses default settings
+Hopper.serveWithMiddleware(middleware, ...) // applies middleware to all routes
+Hopper.serveWithSettings([
   // to define a custom handler to run when a request URL does not match any routes
   // (it is recommended that this handler return a Hopper.NotFound status)
   Hopper.NotFoundHandler(req => ...),
@@ -102,10 +104,10 @@ Hopper.scopeWithOptions([
   // (it is recommended that this handler return a Hopper.MethodNotAllowed status
   // and set an "Allow" header with the allowed methods)
   Hopper.MethodNotAllowedHandler((allowedMethods, req) => ...)
-
-  // to define a global middleware to be applied to all routes
-  Hopper.GlobalMiddleware(...)
 ], ...)
+// combination of above two (naming will be done in a more efficient way once
+// optional arguments are added to Grain)
+Hopper.serveWithMiddlewareAndSettings(middleware, settings, ...)
 ```
 
 Next guide: [Middleware](3-middleware.md)

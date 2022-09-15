@@ -128,19 +128,18 @@ import Hopper from "../hopper"
 let makeMw = suffix => next => req => {
   let res = next(req)
   let b = Hopper.body(res) ++ " - " ++ suffix
-  Hopper.response(Hopper.status(res), Hopper.headers(res), b)
+  Hopper.newBody(b, res)
 }
 
-Hopper.serveWithSettings([
+Hopper.serveWithMiddlewareAndSettings(makeMw("glob"), [
   Hopper.NotFoundHandler(req => {
     Hopper.newStatus(Hopper.NotFound, Hopper.text("CUSTOM - Route not found"))
   }),
   Hopper.MethodNotAllowedHandler((allowed, req) => {
     Hopper.newStatus(Hopper.NotFound, Hopper.text("CUSTOM - Route with method not found"))
-  }),
-  Hopper.GlobalMiddleware(makeMw("glob"))
+  })
 ], [
-  Hopper.scopeWithMiddleware("/info/.*", makeMw("scope"), [
+  Hopper.scopeWithMiddleware("/info/", makeMw("scope"), [
     Hopper.get("/<caught(.*)>/end", req => {
       let v = Hopper.param("caught", req)
       Hopper.text(v)
@@ -161,7 +160,7 @@ END
 assertCorrect "$expected" "$out"
 
 
-out=$(REQUEST_METHOD=GET PATH_INFO=/info/uncaught/what CONTENT_LENGTH=0 grain run outTest.gr.wasm)
+out=$(REQUEST_METHOD=GET PATH_INFO=/info/what CONTENT_LENGTH=0 grain run outTest.gr.wasm)
 read -r -d '' expected << END
 content-type: text/plain
 status: 404
@@ -171,7 +170,7 @@ END
 assertCorrect "$expected" "$out"
 
 
-out=$(REQUEST_METHOD=POST PATH_INFO=/info/uncaught/caught-thing.stuff/end CONTENT_LENGTH=0 grain run outTest.gr.wasm)
+out=$(REQUEST_METHOD=POST PATH_INFO=/info/caught-thing.stuff/end CONTENT_LENGTH=0 grain run outTest.gr.wasm)
 read -r -d '' expected << END
 content-type: text/plain
 status: 404
@@ -181,12 +180,49 @@ END
 assertCorrect "$expected" "$out"
 
 
-out=$(REQUEST_METHOD=GET PATH_INFO=/info/uncaught/caught-thing.stuff/end CONTENT_LENGTH=0 grain run outTest.gr.wasm)
+out=$(REQUEST_METHOD=GET PATH_INFO=/info/caught-thing.stuff/end CONTENT_LENGTH=0 grain run outTest.gr.wasm)
 read -r -d '' expected << END
 content-type: text/plain
 status: 200
 
 caught-thing.stuff - scope - glob
+END
+assertCorrect "$expected" "$out"
+
+
+cat > outTest.gr <<EOF
+import Map from "map"
+import Option from "option"
+import Result from "result"
+import Hopper from "../hopper"
+
+let mw = next => req => {
+  Hopper.setVariable("toRequest", 123, req)
+  let res = next(req)
+  let fromReq: Hopper.Variable<String> = Hopper.variable("fromRequest", res)
+  let val = Result.unwrap(fromReq)
+  let val = "cool"
+  Hopper.newBody(Hopper.body(res) ++ " - " ++ val, res)
+}
+
+Hopper.serve([
+  Hopper.get("/vars", mw(req => {
+    let v: Number = Result.unwrap(Hopper.variable("toRequest", req))
+    let res = Hopper.text(toString(v + 1))
+    Hopper.setVariable("fromRequest", "cool", res)
+    res
+  }))
+])
+EOF
+
+grain compile outTest.gr
+
+out=$(REQUEST_METHOD=GET PATH_INFO=/vars CONTENT_LENGTH=0 grain run outTest.gr.wasm)
+read -r -d '' expected << END
+content-type: text/plain
+status: 200
+
+124 - cool
 END
 assertCorrect "$expected" "$out"
 

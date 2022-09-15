@@ -33,7 +33,7 @@ Hopper.serve([
 ])
 ```
 
-## Statelessness
+## Per-Request Statelessness
 Since Hopper is built atop WAGI, each incoming request will be handled in an independent manner. That is, something like this may not do what you expect:
 ```
 let mut numRequests = 0
@@ -45,7 +45,7 @@ Hopper.serve([
   })
 ])
 ```
-This server will actually always respond with `This is request number 1` since a fresh copy of your code (where `numRequests = 0`) will be run for each request.
+This server will actually *always* respond with `This is request number 1` since a fresh copy of your code (where `numRequests = 0`) will be run for each request.
 
 ## Relevant API Portions
 
@@ -71,6 +71,8 @@ Hopper.text("Hello there") // response with Content-Type: text/plain
 Hopper.json("{\"name\": \"val\"}") // response with Content-Type: application/json
 Hopper.contentType("text/html", "<body><p>I am HTML</p></body>")
 Hopper.newStatus(Hopper.BadRequest, Hopper.text("Whoops")) // response with content/headers of text response but 400 status
+Hopper.newHeaders(Map.make(), Hopper.text("New headers"))
+Hopper.newBody("New body", Hopper.text("Old body"))
 Hopper.file("asdf.txt") // response with file contents as the body (file should be in the configured WAGI volume)
 
 // the following can be used to create redirection responses
