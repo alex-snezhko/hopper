@@ -35,7 +35,7 @@ export enum Method {
   Patch,
   Options,
   Trace,
-  Method(String)
+  Method(String),
 }
 
 /**
@@ -43,7 +43,7 @@ export enum Method {
  */
 export enum OneOrMany<a> {
   Val(a),
-  Vals(List<a>)
+  Vals(List<a>),
 }
 
 // underscore prefix to discourage direct record field access
@@ -56,7 +56,7 @@ export enum OneOrMany<a> {
 export record RequestMsgData {
   _wagiEnv: Map.Map<String, String>,
   _params: Map.Map<String, String>,
-  _query: Map.Map<String, OneOrMany<String>>
+  _query: Map.Map<String, OneOrMany<String>>,
 }
 
 /**
@@ -120,7 +120,7 @@ export enum Status {
   NotExtended,
   NetworkAuthenticationRequired,
   // arbitrary status
-  Status(Number)
+  Status(Number),
 }
 
 /**
@@ -129,7 +129,7 @@ export enum Status {
  * Typically you should not access the fields of this record directly.
  */
 export record ResponseMsgData {
-  _status: Status
+  _status: Status,
 }
 
 /**
@@ -167,16 +167,19 @@ export type Middleware = RequestHandler -> RequestHandler
 // test-export
 export enum RequestMethods {
   Methods(List<Method>),
-  All
+  All,
 }
 
-record Route {
+/**
+ * Represents a route on the server with a request handler attached to it.
+ */
+export record Route {
   path: String,
   routeHandler: RouteHandler,
 },
 enum RouteHandler {
   Endpoint(RequestMethods, RequestHandler),
-  Scope(Middleware, List<Route>)
+  Scope(Middleware, List<Route>),
 }
 
 /**
@@ -218,7 +221,13 @@ export enum ServerSetting {
 
 let genericErrMsg = "make sure you are running in a properly configured WAGI environment"
 let failWithMsg = msg => fail "ERROR " ++ msg ++ "; " ++ genericErrMsg
-let failWithMsgWithErr = (msg, err) => fail "ERROR " ++ msg ++ "; " ++ genericErrMsg ++ "; err " ++ toString(err)
+let failWithMsgWithErr = (msg, err) =>
+  fail "ERROR " ++
+  msg ++
+  "; " ++
+  genericErrMsg ++
+  "; err " ++
+  toString(err)
 
 /**
  * Writes a message to the WAGI log file.
@@ -240,109 +249,95 @@ export let middlewares: List<Middleware> -> Middleware = mws => handler => {
 }
 
 // credit to https://github.com/deislabs/wagi-fileserver for the media types
-let mediaTypes = Map.fromList([
-  // Text formats
-  ("txt", "text/plain"),
-  ("md", "text/plain"),
-  ("mdown", "text/plain"),
-  ("htm", "text/html"),
-  ("html", "text/html"),
-  ("xhtml", "application/xhtml+xml"),
-  ("xml", "application/xml"),
-  ("css", "text/css"),
-  ("ics", "text/calendar"),
-
-  // Serialization formats
-  ("json", "application/json"),
-  ("jsonld", "application/ld+json"),
-  ("toml", "application/toml"),
-  ("yaml", "application/yaml"),
-
-  // Applications
-  // According to MSDN, prefered is text/javascript
-  ("js", "text/javascript"),
-  ("mjs", "text/javascript"),
-  ("wasm", "application/wasm"),
-  ("csv", "text/csv"),
-  ("sh", "application/x-sh"),
-
-  // Images
-  ("apng", "image/apng"),
-  ("avif", "image/avif"),
-  ("png", "image/png"),
-  ("png", "image/png"),
-  ("jpg", "image/jpeg"),
-  ("jpeg", "image/jpeg"),
-  ("pjpeg", "image/jpeg"),
-  ("pjp", "image/jpeg"),
-  ("jfif", "image/jpeg"),
-  ("gif", "image/gif"),
-  ("tif", "image/tiff"),
-  ("tiff", "image/tiff"),
-  ("webp", "image/webp"),
-  ("svg", "image/svg+xml"),
-  ("bmp", "image/bmp"),
-  ("ico", "image/vnd.microsoft.icon"),
-
-  // Audio/Video
-  ("aac", "audio/aac"),
-  ("avi", "video/x-msvideo"),
-  ("wav", "audio/wave"),
-  ("webm", "video/webm"),
-  ("mp3", "audio/mpeg"),
-  ("mp4", "video/mp4"),
-  ("mpeg", "video/mpeg"),
-  ("oga", "audio/ogg"),
-  ("ogv", "video/ogg"),
-  ("ogx", "application/ogg"),
-  ("ts", "video/mp2t"),
-
-  // Compressed
-  ("bz2", "application/x-bzip2"),
-  ("tbz", "application/x-bzip2"),
-  ("tbz2", "application/x-bzip2"),
-  ("gz", "application/gzip"),
-  ("rar", "application/vnd.rar"),
-  ("tar", "text/x-tar"),
-  ("tgz", "application/gzip"),
-  ("jar", "application/java-archive"),
-  ("mpkg", "application/vnd.apple.installer+xml"),
-  ("zip", "application/zip"),
-  ("7z", "application/x-7z-compressed"),
-
-  // Binary
-  ("azw", "application/vnd.amazon.ebook"),
-  ("bin", "application/octet-stream"),
-  ("doc", "application/msword"),
-  (
-    "docx",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ),
-  ("epub", "application/epub+zip"),
-  ("odp", "application/vnd.oasis.opendocument.presentation"),
-  ("ods", "application/vnd.oasis.opendocument.spreadsheet"),
-  ("odt", "application/vnd.oasis.opendocument.text"),
-  ("pdf", "application/pdf"),
-  ("ppt", "application/vnd.ms-powerpoint"),
-  (
-    "pptx",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  ),
-  ("rtf", "application/rtf"),
-  ("vsd", "application/vnd.visio"),
-  ("xls", "application/vnd.ms-excel"),
-  (
-    "xlsx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  ),
-
-  // Fonts
-  ("eot", "application/vnd.ms-fontobject"),
-  ("otf", "font/otf"),
-  ("ttf", "font/ttf"),
-  ("woff", "font/woff"),
-  ("woff2", "font/woff2"),
-])
+let mediaTypes = Map.fromList(
+  [
+    ("txt", "text/plain"),
+    ("md", "text/plain"),
+    ("mdown", "text/plain"),
+    ("htm", "text/html"),
+    ("html", "text/html"),
+    ("xhtml", "application/xhtml+xml"),
+    ("xml", "application/xml"),
+    ("css", "text/css"),
+    ("ics", "text/calendar"),
+    ("json", "application/json"),
+    ("jsonld", "application/ld+json"),
+    ("toml", "application/toml"),
+    ("yaml", "application/yaml"),
+    ("js", "text/javascript"),
+    ("mjs", "text/javascript"),
+    ("wasm", "application/wasm"),
+    ("csv", "text/csv"),
+    ("sh", "application/x-sh"),
+    ("apng", "image/apng"),
+    ("avif", "image/avif"),
+    ("png", "image/png"),
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("pjpeg", "image/jpeg"),
+    ("pjp", "image/jpeg"),
+    ("jfif", "image/jpeg"),
+    ("gif", "image/gif"),
+    ("tif", "image/tiff"),
+    ("tiff", "image/tiff"),
+    ("webp", "image/webp"),
+    ("svg", "image/svg+xml"),
+    ("bmp", "image/bmp"),
+    ("ico", "image/vnd.microsoft.icon"),
+    ("aac", "audio/aac"),
+    ("avi", "video/x-msvideo"),
+    ("wav", "audio/wave"),
+    ("webm", "video/webm"),
+    ("mp3", "audio/mpeg"),
+    ("mp4", "video/mp4"),
+    ("mpeg", "video/mpeg"),
+    ("oga", "audio/ogg"),
+    ("ogv", "video/ogg"),
+    ("ogx", "application/ogg"),
+    ("ts", "video/mp2t"),
+    ("bz2", "application/x-bzip2"),
+    ("tbz", "application/x-bzip2"),
+    ("tbz2", "application/x-bzip2"),
+    ("gz", "application/gzip"),
+    ("rar", "application/vnd.rar"),
+    ("tar", "text/x-tar"),
+    ("tgz", "application/gzip"),
+    ("jar", "application/java-archive"),
+    ("mpkg", "application/vnd.apple.installer+xml"),
+    ("zip", "application/zip"),
+    ("7z", "application/x-7z-compressed"),
+    ("azw", "application/vnd.amazon.ebook"),
+    ("bin", "application/octet-stream"),
+    ("doc", "application/msword"),
+    (
+      "docx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ),
+    ("epub", "application/epub+zip"),
+    ("odp", "application/vnd.oasis.opendocument.presentation"),
+    ("ods", "application/vnd.oasis.opendocument.spreadsheet"),
+    ("odt", "application/vnd.oasis.opendocument.text"),
+    ("pdf", "application/pdf"),
+    ("ppt", "application/vnd.ms-powerpoint"),
+    (
+      "pptx",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ),
+    ("rtf", "application/rtf"),
+    ("vsd", "application/vnd.visio"),
+    ("xls", "application/vnd.ms-excel"),
+    (
+      "xlsx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ),
+    ("eot", "application/vnd.ms-fontobject"),
+    ("otf", "font/otf"),
+    ("ttf", "font/ttf"),
+    ("woff", "font/woff"),
+    ("woff2", "font/woff2"),
+  ]
+)
 
 /**
  * Guesses the MIME type of a media file by its filename extension.
@@ -351,12 +346,13 @@ let mediaTypes = Map.fromList([
  * @returns A MIME type string for the filename
  */
 export let guessMimeType = fileName => {
+  let default = "application/octet-stream"
   match (String.lastIndexOf(".", fileName)) {
     Some(i) => {
       let extension = String.slice(i + 1, String.length(fileName), fileName)
-      Option.unwrapWithDefault("application/octet-stream", Map.get(extension, mediaTypes))
+      Option.unwrapWithDefault(default, Map.get(extension, mediaTypes))
     },
-    None => "application/octet-stream",
+    None => default,
   }
 }
 
@@ -371,7 +367,7 @@ export let splitOneOrManyMap = map => {
   let vals = List.flatMap(((key, val)) => {
     match (val) {
       Val(val) => [(key, val)],
-      Vals(vals) => List.map(val => (key, val), vals)
+      Vals(vals) => List.map(val => (key, val), vals),
     }
   }, Map.toList(map))
   List.sort(compare, vals)
@@ -388,26 +384,25 @@ export let splitOneOrManyMap = map => {
 export let joinOneOrManyMap = list => {
   let valMap = Map.make()
   List.forEach(((key, val)) => {
-    match (Map.get(key, valMap)) {
-      None => Map.set(key, Val(val), valMap),
-      Some(Val(currVal)) => Map.set(key, Vals([currVal, val]), valMap),
-      Some(Vals(currVals)) => Map.set(key, Vals(List.append(currVals, [val])), valMap)
+    let val = match (Map.get(key, valMap)) {
+      None => Val(val),
+      Some(Val(currVal)) => Vals([currVal, val]),
+      Some(Vals(currVals)) => Vals(List.append(currVals, [val])),
     }
+    Map.set(key, val, valMap)
   }, list)
   valMap
 }
 
 let replacePatternsWith = (str, re, replace) => {
   let strLen = String.length(str)
-  let matchPositions = List.map(
-    (reMatch: Regex.MatchResult) => Option.unwrap(reMatch.groupPosition(0)),
-    Regex.findAll(re, str)
-  )
+  let matchPositions = List.map((reMatch: Regex.MatchResult) =>
+    Option.unwrap(reMatch.groupPosition(0)), Regex.findAll(re, str))
   let parts = List.zipWith(
     ((_, prevEnd), (currBegin, currEnd)) => {
       let before = String.slice(prevEnd, currBegin, str)
       let matched = String.slice(currBegin, currEnd, str)
-      before ++ if (matched != "") replace(matched) else ""
+      before ++ (if (matched != "") replace(matched) else "")
     },
     [(0, 0), ...matchPositions],
     List.append(matchPositions, [(strLen, strLen)])
@@ -423,7 +418,7 @@ let toHexString = num => {
     13 => "D",
     14 => "E",
     15 => "F",
-    _ => toString(num)
+    _ => toString(num),
   }
 }
 
@@ -437,12 +432,13 @@ let pctEncodedRegex = Result.unwrap(Regex.make("%[0-9A-Fa-f]{2}"))
  * @returns A percent-encoding of the given string
  */
 export let percentEncode = str => {
-  replacePatternsWith(str, toEncodeRegex, c => {
+  let replaceFn = c => {
     let code = String.charCodeAt(0, c)
     let firstHex = code >> 4
     let secondHex = code % 16
     "%" ++ toString(firstHex) ++ toHexString(secondHex)
-  })
+  }
+  replacePatternsWith(str, toEncodeRegex, replaceFn)
 }
 
 /**
@@ -452,12 +448,13 @@ export let percentEncode = str => {
  * @returns A decoding of the given percent-encoded string
  */
 export let percentDecode = str => {
-  replacePatternsWith(str, pctEncodedRegex, pctEncoding => {
+  let replaceFn = pctEncoding => {
     // truncate percent
     let hex = String.slice(1, 3, pctEncoding)
     let code = Result.unwrap(Number.parseInt(hex, 16))
     Char.toString(Char.fromCode(code))
-  })
+  }
+  replacePatternsWith(str, pctEncodedRegex, replaceFn)
 }
 
 /**
@@ -483,7 +480,7 @@ let urlDecodeParts = parts => {
         let name = String.slice(0, i, part)
         let val = String.slice(i + 1, String.length(part), part)
         (percentDecode(name), percentDecode(val))
-      }
+      },
     }
   }, parts)
   joinOneOrManyMap(partKeyVals)
@@ -499,98 +496,6 @@ export let urlDecode = str => {
   let parts = Array.toList(String.split("&", str))
   urlDecodeParts(parts)
 }
-
-/**
- * @section Messages: Functions that can be used on both requests and responses
- */
-
-let toLower = str => {
-  String.implode(Array.map(c => {
-    let code = Char.code(c)
-    if (code >= 65 && code <= 90) Char.fromCode(code + 32) else c
-  }, String.explode(str)))
-}
-
-let headerNormed = str => {
-  String.implode(Array.map(
-    c => if (c == '_') '-' else c,
-    String.explode(toLower(str))
-  ))
-}
-
-/**
- * Fetches a header from the message.
- * 
- * @param key: The header to request
- * @param msg: The request or response to examine
- * @returns The header value requested
- */
-export let header = (key, msg) => {
-  let key = headerNormed(key)
-  let header = List.find(
-    ((headerKey, val)) => headerNormed(headerKey) == key,
-    Map.toList(msg._headers)
-  )
-  match (header) {
-    Some((_, val)) => Some(val),
-    None => None
-  }
-}
-
-/**
- * Fetches headers on a message.
- * 
- * @param msg: The request or response to examine
- * @returns The headers on the request or response, with header names all in lowercase
- */
-export let headers = msg => {
-  Map.fromList(List.map(((key, val)) => (headerNormed(key), val), Map.toList(msg._headers)))
-}
-
-/**
- * Fetches the message body as a string.
- * 
- * @param msg: The request or response to examine
- * @returns The body as a string
- */
-export let body = msg => {
-  msg._body
-}
-
-/**
- * Sets a variable on a message to a new arbitrary value.
- * 
- * @param key: The variable to set
- * @param value: The new value to give the variable
- * @param msg: The message to attach the variable to
- */
-export let setVariable = (key, value, msg) => {
-  Map.set(key, Marshal.marshal(value), msg._variables)
-}
-
-/**
- * Fetches the value of a variable set on a message. The result of this
- * function should be explicitly typed.
- * 
- * @param key: The variable to fetch
- * @param msg: The message to inspect
- * @returns The value of the variable requested
- */
-export let variable = (key, msg) => {
-  match (Map.get(key, msg._variables)) {
-    Some(val) => {
-      match (Marshal.unmarshal(val)) {
-        Ok(val) => Ok(val),
-        Err(err) => Err(DeserializationError(err)),
-      }
-    },
-    None => Err(NotSet)
-  }: Variable<a>
-}
-
-/**
- * @section Requests: Functions related to handling incoming requests.
- */
 
 let methodPairs = [
   (Get, "GET"),
@@ -617,7 +522,7 @@ let stringToMethodMap = Map.fromList(List.map(((a, b)) => (b, a), methodPairs))
 export let stringToMethod = str => {
   match (Map.get(str, stringToMethodMap)) {
     Some(method) => method,
-    None => Method(str)
+    None => Method(str),
   }
 }
 
@@ -630,105 +535,13 @@ export let stringToMethod = str => {
 export let methodToString = method => {
   match (method) {
     Method(str) => str,
-    _ => Option.unwrap(Map.get(method, methodToStringMap))
+    _ => Option.unwrap(Map.get(method, methodToStringMap)),
   }
 }
-
-/**
- * Fetches a URL query parameter with the given name from a request.
- * 
- * @param key: The name of the parameter to fetch the value of
- * @param req: The request to fetch the query parameter from
- * @returns The value of the query parameter with the given name
- */
-export let query = (key, req: Request) => {
-  Option.map(val => match (val) {
-    Val(val) => val,
-    Vals([val, ..._]) => val,
-    _ => fail "",
-  }, Map.get(key, req._message._query))
-}
-
-/**
- * Fetches a list of values associated with the URL query parameter with the
- * given name.
- * 
- * @param key: The name of the parameter to fetch the value of
- * @param req: The request to fetch the query parameters from
- * @returns The list of values of the query parameter with the given name
- */
-export let queryList = (key, req: Request) => {
-  match (Map.get(key, req._message._query)) {
-    None => [],
-    Some(Val(val)) => [val],
-    Some(Vals(vals)) => vals,
-  }
-}
-
-/**
- * Fetches all URL query parameters.
- * 
- * @param req: The request to fetch the query parameters from
- * @returns All query parameters given
- */
-export let queries = (req: Request) => {
-  req._message._query
-}
-
-let getPath = wagiEnv => {
-  match (Map.get("PATH_INFO", wagiEnv)) {
-    Some(val) => val,
-    None => failWithMsg("Did not find \"PATH_INFO\" in environment")
-  }
-}
-
-/**
- * Fetches the full path from the requested URL.
- * 
- * @param req: The request to examine
- * @returns The full path requested
- */
-export let path = (req: Request) => {
-  getPath(req._message._wagiEnv)
-}
-
-/**
- * Fetches a path parameter from the request.
- * 
- * @param key: The path parameter to fetch
- * @param req: The request to examine
- * @returns The path parameter requested
- */
-export let param = (key, req: Request) => {
-  let failMsg = "URL path param " ++ key ++ " does not exist on route"
-  Option.expect(failMsg, Map.get(key, req._message._params))
-}
-
-let getReqMethod = wagiEnv => {
-  match (Map.get("REQUEST_METHOD", wagiEnv)) {
-    Some(reqMethod) => stringToMethod(reqMethod),
-    _ => failWithMsg("Did not find \"REQUEST_METHOD\" in request")
-  }
-}
-
-/**
- * Fetches the HTTP method of the request.
- * 
- * @param req: The request to examine
- * @returns The HTTP method of the request.
- */
-export let method = (req: Request) => {
-  getReqMethod(req._message._wagiEnv)
-}
-
-/**
- * @section Responses: Functions related to handling outgoing responses.
- */
 
 let statusPairs = [
   (Continue, 100),
   (SwitchingProtocols, 101),
-
   (HttpOk, 200),
   (Created, 201),
   (Accepted, 202),
@@ -736,7 +549,6 @@ let statusPairs = [
   (NoContent, 204),
   (ResetContent, 205),
   (ParialContent, 206),
-
   (MultipleChoices, 300),
   (MovedPermanently, 301),
   (Found, 302),
@@ -744,7 +556,6 @@ let statusPairs = [
   (NotModified, 304),
   (TemporaryRedirect, 307),
   (PermanentRedirect, 308),
-
   (BadRequest, 400),
   (Unauthorized, 401),
   (PaymentRequired, 402),
@@ -771,7 +582,6 @@ let statusPairs = [
   (TooManyRequests, 429),
   (RequestHeaderFieldsTooLarge, 431),
   (UnavailableForLegalReasons, 451),
-
   (InternalServerError, 500),
   (NotImplemented, 501),
   (BadGateway, 502),
@@ -795,7 +605,7 @@ let codeToStatusMap = Map.fromList(List.map(((a, b)) => (b, a), statusPairs))
 export let codeToStatus = code => {
   match (Map.get(code, codeToStatusMap)) {
     Some(status) => status,
-    _ => Status(code)
+    _ => Status(code),
   }
 }
 
@@ -808,7 +618,7 @@ export let codeToStatus = code => {
 export let statusToCode = status => {
   match (status) {
     Status(status) => status,
-    _ => Option.unwrap(Map.get(status, statusToCodeMap))
+    _ => Option.unwrap(Map.get(status, statusToCodeMap)),
   }
 }
 
@@ -859,6 +669,188 @@ export let isClientErrorStatus = isStatusType(400)
 export let isServerErrorStatus = isStatusType(500)
 
 /**
+ * @section Messages: Functions that can be used on both requests and responses
+ */
+
+let toLower = str => {
+  String.implode(
+    Array.map(c => {
+      let code = Char.code(c)
+      if (code >= 65 && code <= 90) Char.fromCode(code + 32) else c
+    }, String.explode(str))
+  )
+}
+
+let headerNormed = str => {
+  let chars = String.explode(toLower(str))
+  String.implode(Array.map(c => if (c == '_') '-' else c, chars))
+}
+
+/**
+ * Fetches a header from the message.
+ * 
+ * @param key: The header to request
+ * @param msg: The request or response to examine
+ * @returns The header value requested
+ */
+export let header = (key, msg) => {
+  let key = headerNormed(key)
+  let headersList = Map.toList(msg._headers)
+  let header = List.find(((k, val)) => headerNormed(k) == key, headersList)
+  match (header) {
+    Some((_, val)) => Some(val),
+    None => None,
+  }
+}
+
+/**
+ * Fetches headers on a message.
+ * 
+ * @param msg: The request or response to examine
+ * @returns The headers on the request or response, with header names all in lowercase
+ */
+export let headers = msg => {
+  let headersList = Map.toList(msg._headers)
+  Map.fromList(List.map(((key, val)) => (headerNormed(key), val), headersList))
+}
+
+/**
+ * Fetches the message body as a string.
+ * 
+ * @param msg: The request or response to examine
+ * @returns The body as a string
+ */
+export let body = msg => {
+  msg._body
+}
+
+/**
+ * Sets a variable on a message to a new arbitrary value.
+ * 
+ * @param key: The variable to set
+ * @param value: The new value to give the variable
+ * @param msg: The message to attach the variable to
+ */
+export let setVariable = (key, value, msg) => {
+  Map.set(key, Marshal.marshal(value), msg._variables)
+}
+
+/**
+ * Fetches the value of a variable set on a message. The result of this
+ * function should be explicitly typed.
+ * 
+ * @param key: The variable to fetch
+ * @param msg: The message to inspect
+ * @returns The value of the variable requested
+ */
+export let variable = (key, msg) => {
+  match (Map.get(key, msg._variables)) {
+    Some(val) => {
+      match (Marshal.unmarshal(val)) {
+        Ok(val) => Ok(val),
+        Err(err) => Err(DeserializationError(err)),
+      }
+    },
+    None => Err(NotSet),
+  }: Variable<a>
+}
+
+/**
+ * @section Requests: Functions related to handling incoming requests.
+ */
+
+/**
+ * Fetches a URL query parameter with the given name from a request.
+ * 
+ * @param key: The name of the parameter to fetch the value of
+ * @param req: The request to fetch the query parameter from
+ * @returns The value of the query parameter with the given name
+ */
+export let query = (key, req: Request) => {
+  Option.map(val => match (val) {
+    Val(val) => val,
+    Vals([val, ..._]) => val,
+    _ => fail "",
+  }, Map.get(key, req._message._query))
+}
+
+/**
+ * Fetches a list of values associated with the URL query parameter with the
+ * given name.
+ * 
+ * @param key: The name of the parameter to fetch the value of
+ * @param req: The request to fetch the query parameters from
+ * @returns The list of values of the query parameter with the given name
+ */
+export let queryList = (key, req: Request) => {
+  match (Map.get(key, req._message._query)) {
+    None => [],
+    Some(Val(val)) => [val],
+    Some(Vals(vals)) => vals,
+  }
+}
+
+/**
+ * Fetches all URL query parameters.
+ * 
+ * @param req: The request to fetch the query parameters from
+ * @returns All query parameters given
+ */
+export let queries = (req: Request) => {
+  req._message._query
+}
+
+let getPath = wagiEnv => {
+  match (Map.get("PATH_INFO", wagiEnv)) {
+    Some(val) => val,
+    None => failWithMsg("Did not find \"PATH_INFO\" in environment"),
+  }
+}
+
+/**
+ * Fetches the full path from the requested URL.
+ * 
+ * @param req: The request to examine
+ * @returns The full path requested
+ */
+export let path = (req: Request) => {
+  getPath(req._message._wagiEnv)
+}
+
+/**
+ * Fetches a path parameter from the request.
+ * 
+ * @param key: The path parameter to fetch
+ * @param req: The request to examine
+ * @returns The path parameter requested
+ */
+export let param = (key, req: Request) => {
+  let failMsg = "URL path param " ++ key ++ " does not exist on route"
+  Option.expect(failMsg, Map.get(key, req._message._params))
+}
+
+let getReqMethod = wagiEnv => {
+  match (Map.get("REQUEST_METHOD", wagiEnv)) {
+    Some(reqMethod) => stringToMethod(reqMethod),
+    _ => failWithMsg("Did not find \"REQUEST_METHOD\" in request"),
+  }
+}
+
+/**
+ * Fetches the HTTP method of the request.
+ * 
+ * @param req: The request to examine
+ * @returns The HTTP method of the request.
+ */
+export let method = (req: Request) => {
+  getReqMethod(req._message._wagiEnv)
+}
+
+/**
+ * @section Responses: Functions related to handling outgoing responses.
+ */
+
+/**
  * Creates a new `Response` with a status, headers, and body.
  * 
  * @param status: The desired HTTP status
@@ -867,11 +859,15 @@ export let isServerErrorStatus = isStatusType(500)
  * @returns A new `Response` with the given values
  */
 export let response = (status, headers, body) => {
-  _message: { _status: status, },
-  _variables: Map.make(),
-  _headers: headers,
-  _body: body
-}: Response
+  {
+    _message: { _status: status, },
+    _variables: Map.make(),
+    _headers: headers,
+    _body: body,
+  }: Response
+}
+
+let ctHeader = contentType => Map.fromList([("Content-Type", contentType)])
 
 /**
  * Creates a new OK `Response` with a text body and `"text/plain"` Content-Type.
@@ -879,7 +875,7 @@ export let response = (status, headers, body) => {
  * @param body: The text body to create the `Response` with
  * @returns A new text `Response`
  */
-export let text = body => response(HttpOk, Map.fromList([("Content-Type", "text/plain")]), body)
+export let text = body => response(HttpOk, ctHeader("text/plain"), body)
 
 /**
  * Creates a new OK `Response` with a JSON string body and `"application/json"` Content-Type.
@@ -891,7 +887,7 @@ export let text = body => response(HttpOk, Map.fromList([("Content-Type", "text/
  * @param body: The JSON body to create the `Response` with
  * @returns A new JSON `Response`
  */
-export let json = body => response(HttpOk, Map.fromList([("Content-Type", "application/json")]), body)
+export let json = body => response(HttpOk, ctHeader("application/json"), body)
 
 /**
  * Creates a new OK `Response` with the specified content type.
@@ -900,7 +896,8 @@ export let json = body => response(HttpOk, Map.fromList([("Content-Type", "appli
  * @param body: The body of the response
  * @returns A new `Response` with the given content type
  */
-export let contentType = (contentType, body) => response(HttpOk, Map.fromList([("Content-Type", contentType)]), body)
+export let contentType = (contentType, body) =>
+  response(HttpOk, ctHeader(contentType), body)
 
 /**
  * Creates a new `Response` from an existing response, but with the response status code changed.
@@ -922,7 +919,7 @@ export let newStatus = (status: Status, res: Response) => {
  * @returns A new `Response` with the desired HTTP headers
  */
 export let newHeaders = (headers, res: Response) => {
-  let { _message: { _status, }, _body, _ } = res
+  let { _message: { _status }, _body, _ } = res
   response(_status, headers, _body)
 }
 
@@ -934,7 +931,7 @@ export let newHeaders = (headers, res: Response) => {
  * @returns A new `Response` with the desired HTTP body
  */
 export let newBody = (body, res: Response) => {
-  let { _message: { _status, }, _headers, _ } = res
+  let { _message: { _status }, _headers, _ } = res
   response(_status, _headers, body)
 }
 
@@ -945,17 +942,26 @@ export let newBody = (body, res: Response) => {
  * @returns A new "OK" `Response` if the file is found, or a "Not Found" reponse otherwise
  */
 export let file = filePath => {
-  let result = File.pathOpen(File.pwdfd, [], filePath, [], [File.FdFilestats, File.FdRead], [], [])
+  let result = File.pathOpen(
+    File.pwdfd,
+    [],
+    filePath,
+    [],
+    [File.FdFilestats, File.FdRead],
+    [],
+    []
+  )
 
   match (result) {
-    Err(_) => response(NotFound, Map.fromList([("Content-Type", "text/plain")]), "File Not Found"),
+    Err(_) => response(NotFound, ctHeader("text/plain"), "File Not Found"),
     Ok(fd) => {
       let stats = Result.unwrap(File.fdFilestats(fd))
-      let (contents, _) = Result.unwrap(File.fdRead(fd, Int64.toNumber(stats.size)))
+      let fileSize = Int64.toNumber(stats.size)
+      let (contents, _) = Result.unwrap(File.fdRead(fd, fileSize))
       File.fdClose(fd)
 
-      response(HttpOk, Map.fromList([("Content-Type", guessMimeType(filePath))]), contents)
-    }
+      response(HttpOk, ctHeader(guessMimeType(filePath)), contents)
+    },
   }
 }
 
@@ -968,7 +974,8 @@ export let file = filePath => {
  */
 export let redirectLocal = (path, req: Request) => {
   let item = key => Option.unwrap(Map.get(key, req._message._wagiEnv))
-  let protocol = if (String.startsWith("https://", item("X_FULL_URL"))) "https://" else "http://"
+  let isHttps = String.startsWith("https://", item("X_FULL_URL"))
+  let protocol = if (isHttps) "https://" else "http://"
   let baseUrl = protocol ++ item("SERVER_NAME") ++ ":" ++ item("SERVER_PORT")
   response(Found, Map.fromList([("Location", baseUrl ++ path)]), "")
 }
@@ -979,7 +986,8 @@ export let redirectLocal = (path, req: Request) => {
  * @param url: The URL to redirect to
  * @returns A new redirection `Response` with status code "302 Found"
  */
-export let redirectExternal = url => response(Found, Map.fromList([("Location", url)]), "")
+export let redirectExternal = url =>
+  response(Found, Map.fromList([("Location", url)]), "")
 
 /**
  * Fetches the HTTP response status of a response.
@@ -1149,47 +1157,53 @@ export let scope = (path, routes) => {
 let getWagiEnv = () => {
   let vars = match (Process.env()) {
     Ok(vars) => vars,
-    Err(err) => failWithMsgWithErr("Unable to read system environment variables", err)
+    Err(err) =>
+      failWithMsgWithErr("Unable to read system environment variables", err),
   }
 
-  Map.fromArray(Array.map(var => {
-    match (String.indexOf("=", var)) {
-      Some(i) => {
-        let varName = String.slice(0, i, var)
-        let varVal = String.slice(i + 1, String.length(var), var)
-        (varName, varVal)
-      },
-      None => failWithMsg("Error processing environment variable " ++ var)
-    }
-  }, vars))
+  Map.fromArray(
+    Array.map(var => {
+      match (String.indexOf("=", var)) {
+        Some(i) => {
+          let varName = String.slice(0, i, var)
+          let varVal = String.slice(i + 1, String.length(var), var)
+          (varName, varVal)
+        },
+        None => failWithMsg("Error processing environment variable " ++ var),
+      }
+    }, vars)
+  )
 }
 
 let getHeaders = wagiEnv => {
-  let headerEntries = List.filter(
-    ((key, _)) => String.startsWith("HTTP_", key),
-    Map.toList(wagiEnv)
-  )
+  let isHeader = ((key, _)) => String.startsWith("HTTP_", key)
+  let headers = List.filter(isHeader, Map.toList(wagiEnv))
+
   let headerKeyVals = List.map(((key, val)) => {
     let key = String.slice(5, String.length(key), key)
     (key, val)
-  }, headerEntries)
+  }, headers)
   Map.fromList(headerKeyVals)
 }
 
 let getBody = wagiEnv => {
   let bodyLengthStr = match (Map.get("CONTENT_LENGTH", wagiEnv)) {
     Some(val) => val,
-    None => failWithMsg("Did not find \"CONTENT_LENGTH\" in environment")
+    None => failWithMsg("Did not find \"CONTENT_LENGTH\" in environment"),
   }
 
   let bodyLength = match (Number.parseInt(bodyLengthStr, 10)) {
     Ok(num) => num,
-    Err(err) => failWithMsgWithErr("Failed to parse \"CONTENT_LENGTH\" from environment to an integer", err)
+    Err(err) =>
+      failWithMsgWithErr(
+        "Failed to parse \"CONTENT_LENGTH\" from environment to an integer",
+        err
+      ),
   }
 
   match (File.fdRead(File.stdin, bodyLength)) {
     Ok((body, _)) => body,
-    Err(err) => failWithMsgWithErr("Failed to read request body", err)
+    Err(err) => failWithMsgWithErr("Failed to read request body", err),
   }
 }
 
@@ -1199,7 +1213,7 @@ let getQueryMap = () => {
       let [_, ...queryParamList] = Array.toList(args)
       urlDecodeParts(queryParamList)
     },
-    Err(err) => failWithMsgWithErr("Unable to read system arguments", err)
+    Err(err) => failWithMsgWithErr("Unable to read system arguments", err),
   }
 }
 
@@ -1207,7 +1221,9 @@ let getQueryMap = () => {
 // a bit of a hack to not capture regex groups specified in route.
 // if something is going wrong with matching patterns it may be due to this
 let captureGroupRegex = Result.unwrap(Regex.make("(?<!\\\\)\\((?!\\?)"))
-let replaceWithCapturesRegex = Result.unwrap(Regex.make("<\\w+\\(\\?:(.+?)\\)>"))
+let replaceWithCapturesRegex = Result.unwrap(
+  Regex.make("<\\w+\\(\\?:(.+?)\\)>")
+)
 let paramRegex = Result.unwrap(Regex.make("<\\w+>"))
 let customParamRegex = Result.unwrap(Regex.make("<\\w+\\((.+?)\\)>"))
 // lookbehind to prevent single slash character from being matched
@@ -1216,9 +1232,7 @@ let slashAtEndRegex = Result.unwrap(Regex.make("/$"))
 // test-export
 export let preprocessRouteRegex = route => {
   let preprocessed = List.reduce(
-    (str, (regex, replaceWith)) => {
-      Regex.replaceAll(regex, str, replaceWith)
-    },
+    (str, (regex, replaceWith)) => Regex.replaceAll(regex, str, replaceWith),
     route,
     [
       (captureGroupRegex, "(?:"),
@@ -1242,49 +1256,66 @@ enum RouteMatchStatus {
 
 // use a "precedence" value to keep track of best route found e.g. to
 // make a route with wrong method override one not found at all
-let isBetterRouteMatch = (firstRms, secondRms) => {
-  let precedence = rms => match (rms) {
-    NoMatch => 1,
-    BaseRouteMatch(_) => 2,
-    MethodNotSupported(_) => 3,
-    ExactMatch => 4,
-  }
+let bestRouteMatch = (first, second, mnaHandler) => {
+  let precedence = rms =>
+    match (rms) {
+      NoMatch => 1,
+      BaseRouteMatch(_) => 2,
+      MethodNotSupported(_) => 3,
+      ExactMatch => 4,
+    }
 
+  let (_, pathParams, firstRms) = first
+  let (_, _, secondRms) = second
   match ((firstRms, secondRms)) {
-    (BaseRouteMatch(firstLevel), BaseRouteMatch(secondLevel)) => {
-      firstLevel > secondLevel
+    (MethodNotSupported(firstMethods), MethodNotSupported(secondMethods)) => {
+      let methods = List.unique(List.append(firstMethods, secondMethods))
+      (req => mnaHandler(methods, req), pathParams, MethodNotSupported(methods))
     },
-    _ => precedence(firstRms) > precedence(secondRms)
+    (BaseRouteMatch(firstLevel), BaseRouteMatch(secondLevel)) => {
+      if (firstLevel > secondLevel) first else second
+    },
+    _ when precedence(firstRms) > precedence(secondRms) => first,
+    _ => second,
   }
 }
 
 let paramNameRegex = Result.unwrap(Regex.make("<(\\w+)(?:\\(.+?\\))?>"))
 
 // test-export
-export let findReqHandler = (reqMethod, reqPath, route, notFoundHandler, mnaHandler) => {
-  let reqPath = if (reqPath != "/") Regex.replace(slashAtEndRegex, reqPath, "") else "/"
+export let findReqHandler =
+  (
+    reqMethod,
+    reqPath,
+    route,
+    notFoundHandler,
+    mnaHandler,
+  ) => {
+  let reqPath = if (reqPath != "/") Regex.replace(slashAtEndRegex, reqPath, "")
+    else "/"
 
   // performs breadth-first-search to find suitable request
   // handler for the given path and method.
   let rec findReqHandlerHelper = (pathSegment, route, pathVars, level) => {
-    let paramNames = List.map(
-      (matchRes: Regex.MatchResult) => Option.unwrap(matchRes.group(1)),
-      Regex.findAll(paramNameRegex, route.path)
-    )
-
     let isTerminal = match (route.routeHandler) {
       Endpoint(_, _) => true,
       _ => false,
     }
 
-    let preprocessed = "^" ++ preprocessRouteRegex(route.path) ++ if (isTerminal) "$" else ""
+    let preprocessed = "^" ++
+      preprocessRouteRegex(route.path) ++
+      (if (isTerminal) "$" else "")
+
     let routeRegex = match (Regex.make(preprocessed)) {
       Err(_) => failWithMsg("Invalid route regex " ++ route.path),
-      Ok(routeRegex) => routeRegex
+      Ok(routeRegex) => routeRegex,
     }
     match (Regex.find(routeRegex, pathSegment)) {
       None => (notFoundHandler, pathVars, BaseRouteMatch(level)),
       Some(pathMatch) => {
+        let paramNames = List.map((m: Regex.MatchResult) =>
+          Option.unwrap(m.group(1)), Regex.findAll(paramNameRegex, route.path))
+
         // capture groups being matched means we have found path parameter values
         let pathVars = if (pathMatch.numGroups > 1) {
           let paramValsArr = Array.map(Option.unwrap, pathMatch.allGroups())
@@ -1298,42 +1329,46 @@ export let findReqHandler = (reqMethod, reqPath, route, notFoundHandler, mnaHand
         let reqHandler = match (route.routeHandler) {
           Endpoint(handlerMethods, reqHandler) => {
             match (handlerMethods) {
-              Methods(methods) when !List.contains(reqMethod, methods) => (
-                req => mnaHandler(methods, req),
-                pathVars,
-                MethodNotSupported(methods)
-              ),
-              _ => (reqHandler, pathVars, ExactMatch)
+              Methods(methods) when !List.contains(reqMethod, methods) =>
+                (
+                  req =>
+                    mnaHandler(methods, req),
+                  pathVars,
+                  MethodNotSupported(methods),
+                ),
+              _ => (reqHandler, pathVars, ExactMatch),
             }
           },
           Scope(middleware, routeHandlers) => {
             let (_, thisPathEndI) = Option.unwrap(pathMatch.groupPosition(0))
-            let nextPathSegment = String.slice(thisPathEndI, String.length(pathSegment), pathSegment)
-            let nextPathSegment = if (!String.startsWith("/", nextPathSegment)) "/" ++ nextPathSegment else nextPathSegment
+            let nextPathSegment = String.slice(
+              thisPathEndI,
+              String.length(pathSegment),
+              pathSegment
+            )
+            let nextPathSegment = if (!String.startsWith("/", nextPathSegment))
+                "/" ++
+                nextPathSegment else nextPathSegment
             let (bestReqHandler, bestPathParams, bestRms) = List.reduce(
               (best, routeHandler) => {
-                let this = findReqHandlerHelper(nextPathSegment, routeHandler, pathVars, level + 1)
-                let (_, bestPathParams, bestRms) = best
-                let (_, _, thisRms) = this
-                match ((bestRms, thisRms)) {
-                  (MethodNotSupported(bestMethods), MethodNotSupported(thisMethods)) => {
-                    let methods = List.unique(List.append(bestMethods, thisMethods))
-                    (req => mnaHandler(methods, req), bestPathParams, MethodNotSupported(methods))
-                  },
-                  // overwrite matched route handler if it is better than
-                  // the best one found so far
-                  _ when isBetterRouteMatch(thisRms, bestRms) => this,
-                  _ => best,
-                }
+                let this = findReqHandlerHelper(
+                  nextPathSegment,
+                  routeHandler,
+                  pathVars,
+                  level + 1
+                )
+                // overwrite matched route handler if it is better than
+                // the best one found so far
+                bestRouteMatch(best, this, mnaHandler)
               },
               (notFoundHandler, pathVars, NoMatch),
               routeHandlers
             )
             (middleware(bestReqHandler), bestPathParams, bestRms)
-          }
+          },
         }
         reqHandler
-      }
+      },
     }
   }
   let (reqHandler, pathParams, _) = findReqHandlerHelper(reqPath, route, [], 0)
@@ -1341,55 +1376,54 @@ export let findReqHandler = (reqMethod, reqPath, route, notFoundHandler, mnaHand
 }
 
 let getSettings = settingsList => {
-  let notFoundHandler = Option.mapWithDefault(
-    opt => match (opt) { NotFoundHandler(handler) => handler, _ => fail "" },
-    req => response(
+  let defaultNFH = req => {
+    response(
       NotFound,
       Map.fromList([("Content-Type", "text/plain")]),
       "Requested URL not found"
-    ),
-    List.find(opt => match (opt) {
-      NotFoundHandler(_) => true, _ => false
-    }, settingsList)
-  )
+    )
+  }
 
-  let mnaHandler = Option.mapWithDefault(
-    opt => match (opt) { MethodNotAllowedHandler(handler) => handler, _ => fail "" },
-    (allowed, req) => {
-      let allow = List.join(", ", List.map(methodToString, allowed))
-      response(
-        MethodNotAllowed,
-        Map.fromList([("Content-Type", "text/plain"), ("Allow", allow)]),
-        "Method not allowed for this URL"
-      )
-    },
-    List.find(opt => match (opt) {
-      MethodNotAllowedHandler(_) => true, _ => false
-    }, settingsList)
-  )
+  let defaultMNAH = (allowed, req) => {
+    let allow = List.join(", ", List.map(methodToString, allowed))
+    response(
+      MethodNotAllowed,
+      Map.fromList([("Content-Type", "text/plain"), ("Allow", allow)]),
+      "Method not allowed for this URL"
+    )
+  }
 
-  (notFoundHandler, mnaHandler)
+  match (settingsList) {
+    [NotFoundHandler(nfh), MethodNotAllowedHandler(mnah), ..._] |
+    [NotFoundHandler(nfh), MethodNotAllowedHandler(mnah), ..._] =>
+      (nfh, mnah),
+    [NotFoundHandler(nfh)] => (nfh, defaultMNAH),
+    [MethodNotAllowedHandler(mnah)] => (defaultNFH, mnah),
+    _ => (defaultNFH, defaultMNAH),
+  }
 }
 
 let outputResponse = (res: Response) => {
   let headers = headers(res)
   // script must specify Content-Type per CGI v1.1 spec, so default to
   // application/octet-stream if one was not given
-  Map.update("content-type", val => match (val) {
-    None => Some("application/octet-stream"),
-    _ => val
-  }, headers)
+  Map.update(
+    "content-type",
+    val => match (val) {
+      None => Some("application/octet-stream"),
+      _ => val,
+    },
+    headers
+  )
   Map.set("status", toString(statusToCode(status(res))), headers)
 
-  let headers = List.sort(((k1, _), (k2, _)) => compare(k1, k2), Map.toList(headers))
+  let headers = List.sort(compare, Map.toList(headers))
   let safeHeaders = List.map(((key, val)) => {
     // remove any newline characters from headers because that will cause
     // header values to be written to body (since a blank line separates
     // headers from body in CGI spec)
-    let makeSafe = str => String.implode(Array.filter(
-      c => c != '\n',
-      String.explode(str)
-    ))
+    let makeSafe = str =>
+      String.implode(Array.filter(c => c != '\n', String.explode(str)))
     (makeSafe(key), makeSafe(val))
   }, headers)
 
@@ -1411,7 +1445,12 @@ let outputResponse = (res: Response) => {
  * @param settings: The settings to use for the server
  * @param routes: The root routes for the server
  */
-export let serveWithMiddlewareAndSettings = (rootMiddleware, settings, routes) => {
+export let serveWithMiddlewareAndSettings =
+  (
+    rootMiddleware,
+    settings,
+    routes,
+  ) => {
   let (notFoundHandler, mnaHandler) = getSettings(settings)
 
   let wagiEnv = getWagiEnv()
@@ -1422,18 +1461,14 @@ export let serveWithMiddlewareAndSettings = (rootMiddleware, settings, routes) =
     getPath(wagiEnv),
     rootRoute,
     notFoundHandler,
-    mnaHandler,
+    mnaHandler
   )
 
   let request = {
-    _message: {
-      _wagiEnv: wagiEnv,
-      _params: params,
-      _query: getQueryMap()
-    },
+    _message: { _wagiEnv: wagiEnv, _params: params, _query: getQueryMap() },
     _variables: Map.make(),
     _headers: getHeaders(wagiEnv),
-    _body: getBody(wagiEnv)
+    _body: getBody(wagiEnv),
   }
   let response = reqHandler(request)
   outputResponse(response)
