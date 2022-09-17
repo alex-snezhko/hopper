@@ -90,11 +90,11 @@ Routes can be defined for single request methods or multiple request methods. `H
 Path parameters can be fetched with `Hopper.param`. It is assumed that a path parameter with the given name was actually on the route matcher or a parent scope, otherwise an exception will be thrown.
 
 ### Serving
-`Hopper.serve` has several variations (`Hopper.serveWith[...]`), which can be used to apply special application-wide settings/middleware if desired. In addition to housing logic for core services like parsing requests, the `serve[...]` functions can also be thought of as owning their own scopes mounted at `/`.
+`Hopper.serve` has several variations (`Hopper.serveWith[...]`), which can be used to apply special application-wide options/middleware if desired. In addition to housing logic for core services like parsing requests, the `serve[...]` functions can also be thought of as owning their own scopes mounted at `/`.
 ```
-Hopper.serve(...) // uses default settings
+Hopper.serve(...) // uses default options
 Hopper.serveWithMiddleware(middleware, ...) // applies middleware to all routes
-Hopper.serveWithSettings([
+Hopper.serveWithOptions([
   // to define a custom handler to run when a request URL does not match any routes
   // (it is recommended that this handler return a Hopper.NotFound status)
   Hopper.NotFoundHandler(req => ...),
@@ -107,7 +107,7 @@ Hopper.serveWithSettings([
 ], ...)
 // combination of above two (naming will be done in a more efficient way once
 // optional arguments are added to Grain)
-Hopper.serveWithMiddlewareAndSettings(middleware, settings, ...)
+Hopper.serveWithMiddlewareAndOptions(middleware, options, ...)
 ```
 
 Next guide: [Middleware](3-middleware.md)

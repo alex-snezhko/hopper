@@ -131,7 +131,7 @@ let makeMw = suffix => next => req => {
   Hopper.newBody(b, res)
 }
 
-Hopper.serveWithMiddlewareAndSettings(makeMw("glob"), [
+Hopper.serveWithMiddlewareAndOptions(makeMw("glob"), [
   Hopper.NotFoundHandler(req => {
     Hopper.newStatus(Hopper.NotFound, Hopper.text("CUSTOM - Route not found"))
   }),

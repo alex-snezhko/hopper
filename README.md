@@ -24,6 +24,14 @@ Key features:
 Usage guides as well as API docs can be found in the [docs](/docs) directory of this repo.
 
 
+## Extensions
+Here is a list of extensions adding functionality onto Hopper that may be useful to you:
+- [hopper-form](https://github.com/alex-snezhko/hopper-form), for handling HTML form bodies
+- [hopper-cors](https://github.com/alex-snezhko/hopper-cors), for handling CORS requests
+
+If you have created an extension to Hopper adding useful functionality, feel free to open a PR adding to this list.
+
+
 ## Contributing
 If you find a bug or have a suggestion for improving Hopper, feel free to open a GitHub issue or fork the repo and open a PR!
 

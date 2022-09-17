@@ -139,7 +139,7 @@ testMultiple("path matching - single", [
     [("first", "asdf"), ("second", "hello")]
   ),
 ], ((path, route, expectedParams)) => {
-  let (actualHandler, actualParams) = Hopper.findReqHandler(Hopper.Get, path, route, notFoundHandler, mnaHandler)
+  let (actualHandler, actualParams) = Hopper.findReqHandler(Hopper.Get, path, route, (notFoundHandler, mnaHandler))
   assertThat(expectedHandler, equals(actualHandler))
   assertThat(Map.fromList(expectedParams), equals(actualParams))
 })
@@ -153,7 +153,7 @@ testMultiple("path matching - single - not found", [
   ("/hello", Hopper.get("/hel", expectedHandler)),
   ("/hel/lo", Hopper.scope("/hel", [Hopper.get("/", expectedHandler)])),
 ], ((path, route)) => {
-  let (actualHandler, _) = Hopper.findReqHandler(Hopper.Get, path, route, notFoundHandler, mnaHandler)
+  let (actualHandler, _) = Hopper.findReqHandler(Hopper.Get, path, route, (notFoundHandler, mnaHandler))
   assertThat(expectedHandler, notEquals(actualHandler))
 })
 
@@ -186,7 +186,7 @@ testMultiple("path matching - single - method not accepted", [
     Some("GET, POST, PUT")
   ),
 ], ((path, route, method, allowed)) => {
-  let (actualHandler, _) = Hopper.findReqHandler(method, path, route, notFoundHandler, mnaHandler)
+  let (actualHandler, _) = Hopper.findReqHandler(method, path, route, (notFoundHandler, mnaHandler))
   let res = actualHandler(makeRequest("sample"))
   assertThat(Hopper.header("Allow", res), equals(allowed))
 })
@@ -223,7 +223,7 @@ testMultiple("with middleware", [
     "1-2-3"
   ),
 ], ((path, route, expectedBody)) => {
-  let (reqHandler, _) = Hopper.findReqHandler(Hopper.Get, path, route, notFoundHandler, mnaHandler)
+  let (reqHandler, _) = Hopper.findReqHandler(Hopper.Get, path, route, (notFoundHandler, mnaHandler))
   let res = reqHandler(makeRequest(""))
   assertThat(Hopper.body(res), equals(expectedBody))
 })

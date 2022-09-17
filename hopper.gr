@@ -202,7 +202,7 @@ export enum GetVariableError {
 export type Variable<a> = Result<a, GetVariableError>
 
 /**
- * Represents a setting to apply globally to the server.
+ * Represents an option to apply globally to the server.
  * 
  * `NotFoundHandler` can be used to define a custom 404 Not Found handler
  * when a route is not matched.
@@ -210,7 +210,7 @@ export type Variable<a> = Result<a, GetVariableError>
  * `MethodNotAllowedHandler` can be used to defined a custom 405 method
  * Not Allowed handler for cases of method mismatches.
  */
-export enum ServerSetting {
+export enum ServerOption {
   NotFoundHandler(RequestHandler),
   MethodNotAllowedHandler((List<Method>, Request) -> Response),
 }
@@ -906,7 +906,7 @@ export let contentType = (contentType, body) =>
  * @param res: The base response
  * @returns A new `Response` with the desired HTTP status
  */
-export let newStatus = (status: Status, res: Response) => {
+export let newStatus = (status, res: Response) => {
   let { _headers, _body, _ } = res
   response(status, _headers, _body)
 }
@@ -1230,7 +1230,7 @@ let customParamRegex = Result.unwrap(Regex.make("<\\w+\\((.+?)\\)>"))
 let slashAtEndRegex = Result.unwrap(Regex.make("/$"))
 
 // test-export
-export let preprocessRouteRegex = route => {
+let preprocessRouteRegex = route => {
   let preprocessed = List.reduce(
     (str, (regex, replaceWith)) => Regex.replaceAll(regex, str, replaceWith),
     route,
@@ -1283,14 +1283,9 @@ let bestRouteMatch = (first, second, mnaHandler) => {
 let paramNameRegex = Result.unwrap(Regex.make("<(\\w+)(?:\\(.+?\\))?>"))
 
 // test-export
-export let findReqHandler =
-  (
-    reqMethod,
-    reqPath,
-    route,
-    notFoundHandler,
-    mnaHandler,
-  ) => {
+let findReqHandler = (reqMethod, reqPath, route, handlers) => {
+  let (notFoundHandler, mnaHandler) = handlers
+
   let reqPath = if (reqPath != "/") Regex.replace(slashAtEndRegex, reqPath, "")
     else "/"
 
@@ -1375,7 +1370,7 @@ export let findReqHandler =
   (reqHandler, Map.fromList(pathParams))
 }
 
-let getSettings = settingsList => {
+let getOptions = optionsList => {
   let defaultNFH = req => {
     response(
       NotFound,
@@ -1393,14 +1388,14 @@ let getSettings = settingsList => {
     )
   }
 
-  match (settingsList) {
-    [NotFoundHandler(nfh), MethodNotAllowedHandler(mnah), ..._] |
-    [NotFoundHandler(nfh), MethodNotAllowedHandler(mnah), ..._] =>
-      (nfh, mnah),
-    [NotFoundHandler(nfh)] => (nfh, defaultMNAH),
-    [MethodNotAllowedHandler(mnah)] => (defaultNFH, mnah),
-    _ => (defaultNFH, defaultMNAH),
-  }
+  let (nfh, mnah) = List.reduce(((nfh, mnah), this) => match (this) {
+    NotFoundHandler(x) => (Option.or(nfh, Some(x)), mnah),
+    MethodNotAllowedHandler(x) => (nfh, Option.or(mnah, Some(x))),
+  }, (None, None), optionsList) 
+
+  let nfh = Option.unwrapWithDefault(defaultNFH, nfh)
+  let mnah = Option.unwrapWithDefault(defaultMNAH, mnah)
+  (nfh, mnah)
 }
 
 let outputResponse = (res: Response) => {
@@ -1438,30 +1433,22 @@ let outputResponse = (res: Response) => {
  */
 
 /**
- * Entry point for creating a server, taking a list of routes and settings to
+ * Entry point for creating a server, taking a list of routes and options to
  * apply for the server.
  * 
- * @param rootMiddleware: The middleware to apply to all routes in the application
- * @param settings: The settings to use for the server
+ * @param middleware: The middleware to apply to all routes in the application
+ * @param options: The options to use for the server
  * @param routes: The root routes for the server
  */
-export let serveWithMiddlewareAndSettings =
-  (
-    rootMiddleware,
-    settings,
-    routes,
-  ) => {
-  let (notFoundHandler, mnaHandler) = getSettings(settings)
-
+export let serveWithMiddlewareAndOptions = (middleware, options, routes) => {
   let wagiEnv = getWagiEnv()
 
-  let rootRoute = scopeWithMiddleware("/", rootMiddleware, routes)
+  let rootRoute = scopeWithMiddleware("/", middleware, routes)
   let (reqHandler, params) = findReqHandler(
     getReqMethod(wagiEnv),
     getPath(wagiEnv),
     rootRoute,
-    notFoundHandler,
-    mnaHandler
+    getOptions(options)
   )
 
   let request = {
@@ -1476,32 +1463,32 @@ export let serveWithMiddlewareAndSettings =
 
 /**
  * Entry point for creating a server, taking a list of route handlers and using
- * a default set of settings.
+ * a default set of options.
  * 
- * @param rootMiddleware: The middleware to apply to all routes in the application
+ * @param middleware: The middleware to apply to all routes in the application
  * @param routes: The root routes for the server
  */
-export let serveWithMiddleware = (rootMiddleware, routes) => {
-  serveWithMiddlewareAndSettings(rootMiddleware, [], routes)
+export let serveWithMiddleware = (middleware, routes) => {
+  serveWithMiddlewareAndOptions(middleware, [], routes)
 }
 
 /**
  * Entry point for creating a server, taking a list of route handlers and using
- * a default set of settings.
+ * a default set of options.
  * 
- * @param settings: The settings to use for the server
+ * @param options: The options to use for the server
  * @param routes: The root routes for the server
  */
-export let serveWithSettings = (settings, routes) => {
-  serveWithMiddlewareAndSettings(identity, settings, routes)
+export let serveWithOptions = (options, routes) => {
+  serveWithMiddlewareAndOptions(identity, options, routes)
 }
 
 /**
  * Entry point for creating a server, taking a list of route handlers and using
- * a default set of settings.
+ * a default set of options.
  * 
  * @param routes: The root routes for the server
  */
 export let serve = routes => {
-  serveWithMiddlewareAndSettings(identity, [], routes)
+  serveWithMiddlewareAndOptions(identity, [], routes)
 }

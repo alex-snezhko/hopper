@@ -224,16 +224,16 @@ type Variable<a> = Result<a, GetVariableError>
 Represents the result of fetching a message variable. A `Result` with an
 `Ok` variant containing the value or `GetVariableError` `Err` variant.
 
-### Hopper.**ServerSetting**
+### Hopper.**ServerOption**
 
 ```grain
-enum ServerSetting {
+enum ServerOption {
   NotFoundHandler(RequestHandler),
   MethodNotAllowedHandler(((List<Method>, Request) -> Response)),
 }
 ```
 
-Represents a setting to apply globally to the server.
+Represents an option to apply globally to the server.
 
 `NotFoundHandler` can be used to define a custom 404 Not Found handler
 when a route is not matched.
@@ -1380,14 +1380,14 @@ findReqHandler :
 
 Functions for declaring servers, the starting points of Hopper applications.
 
-### Hopper.**serveWithMiddlewareAndSettings**
+### Hopper.**serveWithMiddlewareAndOptions**
 
 ```grain
-serveWithMiddlewareAndSettings :
-  (Middleware, List<ServerSetting>, List<Route>) -> Void
+serveWithMiddlewareAndOptions :
+  (Middleware, List<ServerOption>, List<Route>) -> Void
 ```
 
-Entry point for creating a server, taking a list of routes and settings to
+Entry point for creating a server, taking a list of routes and options to
 apply for the server.
 
 Parameters:
@@ -1395,7 +1395,7 @@ Parameters:
 |param|type|description|
 |-----|----|-----------|
 |`rootMiddleware`|`Middleware`|The middleware to apply to all routes in the application|
-|`settings`|`List<ServerSetting>`|The settings to use for the server|
+|`options`|`List<ServerOption>`|The options to use for the server|
 |`routes`|`List<Route>`|The root routes for the server|
 
 ### Hopper.**serveWithMiddleware**
@@ -1405,7 +1405,7 @@ serveWithMiddleware : (Middleware, List<Route>) -> Void
 ```
 
 Entry point for creating a server, taking a list of route handlers and using
-a default set of settings.
+a default set of options.
 
 Parameters:
 
@@ -1414,20 +1414,20 @@ Parameters:
 |`rootMiddleware`|`Middleware`|The middleware to apply to all routes in the application|
 |`routes`|`List<Route>`|The root routes for the server|
 
-### Hopper.**serveWithSettings**
+### Hopper.**serveWithOptions**
 
 ```grain
-serveWithSettings : (List<ServerSetting>, List<Route>) -> Void
+serveWithOptions : (List<ServerOption>, List<Route>) -> Void
 ```
 
 Entry point for creating a server, taking a list of route handlers and using
-a default set of settings.
+a default set of options.
 
 Parameters:
 
 |param|type|description|
 |-----|----|-----------|
-|`settings`|`List<ServerSetting>`|The settings to use for the server|
+|`options`|`List<ServerOption>`|The options to use for the server|
 |`routes`|`List<Route>`|The root routes for the server|
 
 ### Hopper.**serve**
@@ -1437,7 +1437,7 @@ serve : List<Route> -> Void
 ```
 
 Entry point for creating a server, taking a list of route handlers and using
-a default set of settings.
+a default set of options.
 
 Parameters:
 

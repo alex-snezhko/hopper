@@ -1,7 +1,7 @@
 # Getting Started
 Firstly, [WAGI](https://github.com/deislabs/wagi) is required to be installed to be used as a runtime environment (the current version of Hopper is confirmed to work with WAGI v0.8.1). Currently, the core Hopper library is distributed as a single Grain file. For example, if you are on UNIX-based system with `curl` installed, you can get the core library with
 ```
-curl https://raw.githubusercontent.com/alexsnezhko3/hopper/main/hopper.gr -o hopper.gr
+curl https://raw.githubusercontent.com/alex-snezhko/hopper/main/hopper.gr -o hopper.gr
 ```
 
 ## WAGI Configuration
