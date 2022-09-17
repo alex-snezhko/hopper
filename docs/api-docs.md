@@ -1355,25 +1355,10 @@ Returns:
 |----|-----------|
 |`Route`|A new `Route` handling requests rooted from the path|
 
-### Hopper.**preprocessRouteRegex**
-
-```grain
-preprocessRouteRegex : String -> String
-```
-
 ### Hopper.**RouteMatchStatus**
 
 ```grain
 type RouteMatchStatus
-```
-
-### Hopper.**findReqHandler**
-
-```grain
-findReqHandler :
-  (Method, String, Route, RequestHandler,
-   ((List<Method>, Request) -> Response)) ->
-   (RequestHandler, Map.Map<String, String>)
 ```
 
 ## Serving
@@ -1394,7 +1379,7 @@ Parameters:
 
 |param|type|description|
 |-----|----|-----------|
-|`rootMiddleware`|`Middleware`|The middleware to apply to all routes in the application|
+|`middleware`|`Middleware`|The middleware to apply to all routes in the application|
 |`options`|`List<ServerOption>`|The options to use for the server|
 |`routes`|`List<Route>`|The root routes for the server|
 
@@ -1411,7 +1396,7 @@ Parameters:
 
 |param|type|description|
 |-----|----|-----------|
-|`rootMiddleware`|`Middleware`|The middleware to apply to all routes in the application|
+|`middleware`|`Middleware`|The middleware to apply to all routes in the application|
 |`routes`|`List<Route>`|The root routes for the server|
 
 ### Hopper.**serveWithOptions**
