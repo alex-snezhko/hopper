@@ -1,14 +1,14 @@
 # Guide: Middleware
-Hopper middlewares are a powerful way to extend Hopper and/or enable code reuse in your project. Middlewares are simply functions which take a request handler as input and produce a new request handler based on it. As the name implies, middlewares sit between your request handlers and the client, and have the ability to transform requests before they reach your request handlers, modify responses before being sent to the client, or perform side effects.
+Hopper middlewares are a powerful way to extend Hopper and/or enable code reuse in your project. Middlewares are simply functions which take a request handler as input and produce a new request handler. As the name implies, middlewares sit between your request handlers and the client, and have the ability to transform requests before they reach your request handlers, modify responses before being sent to the client, or perform side effects.
 
-Here's an example of a very simple middleware that logs some info about each request and response it handles.
+Here's an example of a simple middleware that logs some info about each request and response it handles.
 ```
 let withLogging = next => {
   let newHandler = req => {
     let method = Hopper.methodToString(Hopper.method(req))
     let path = Hopper.path(req)
     Hopper.log(method ++ " " ++ path)
-    // call either the request handler or the next middleware before the request handler
+    // call the "next" handler, which will either be the request handler or another middleware
     let res = next(req)
     let status = Hopper.statusToCode(Hopper.status(res))
     Hopper.log("Responded with " ++ toString(status))
@@ -17,7 +17,9 @@ let withLogging = next => {
   newHandler
 }
 ```
-Here we see that we define the input request handler as "`next`"; since multiple middlewares may be composed on top of each other, the handler our middleware sits on top of can be thought of as the "next" handler in the entire chain of handlers defined for a certain route. The new handler we defined was given an explicit name to illustrate the point, but we can condense it down for brevity
+Here we see that we define the input request handler as "`next`"; since multiple middlewares may be composed on top of each other, the handler our middleware sits on top of can be thought of as the "next" handler in the entire chain of handlers defined for a certain route.
+
+The new handler we defined was given an explicit name to illustrate the point, but we can condense it down for brevity
 ```
 let withLogging = next => req => {
   let method = ...
@@ -66,7 +68,7 @@ Hopper.serveWithMiddleware(withLogging, [
 ## Variables
 Both requests and responses have the capability to contain "variables", primarily for use by middlewares to pass arbitrary data down to their child handlers or vice versa. This is a useful mechanism for extending Hopper, as it can enable additional degrees of abstraction for request handlers.
 
-For example, let's say we have built a library for parsing strings into XML objects, and we want our request handlers to handle XML data. Rather than including all of the parsing logic in each request handler, we can have middleware pass down the XML-parsed data to our handlers.
+For example, let's say we have built a library for parsing strings into XML objects, and we want our request handlers to handle XML data. Rather than including all of the parsing logic in each request handler, we can have a middleware pass down the XML-parsed data to our handlers.
 ```
 type Xml = // ...
 let parseXml = str => // ...
@@ -87,13 +89,13 @@ let xml = req => {
 }
 
 Hopper.serve([
-  Hopper.post("/submitXml", withXmlParsing(req => {
+  Hopper.post("/submit-xml", withXmlParsing(req => {
     let xmlVal = xml(req)
-    // we can now work with the XML data directly
+    // work with the XML data
     // ...
   }))
 ])
 ```
 Variables internally use Grain's `Marshal` standard library module to be serialized and deserialized, and thus may be of any type (meaning `Hopper.variable` does not guarantee type-safety). It is recommended to explicitly type variable accesses with `Hopper.Variable<a>`, ensuring that they are the same type as the values set.
 
-Now that you understand request handling, routing, and the middleware system, you should be equipped to write some HTTP servers with Hopper! Make sure to reference the [API docs](/api-docs.md) to get a sense for the portions of Hopper not covered by this guide.
+Now that you understand request handling, routing, and the middleware system, you should be equipped to write some HTTP servers with Hopper! Make sure to reference the [API docs](/api-docs.md) to get a sense for the portions of Hopper not covered by this guide. Have fun!
